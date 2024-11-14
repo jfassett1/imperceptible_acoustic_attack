@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 
-class EvilDecoder():
+class RawDecoder():
 
     """
     Modified Whisper decoder which pulls out target given sequence
@@ -96,25 +96,9 @@ if __name__ == "__main__":
     model = whisper.load_model(NAME)
 
     sot_tokens = torch.tensor(tokenizer.sot_sequence_including_notimestamps).unsqueeze(dim=1).to(device)
-    qq = EvilDecoder(model=model,tokenizer=tokenizer,device=device)
-
-    # seq= qq.get_eot_prob(mels)
-    # print("EOT",tokenizer.eot)
-    # seq = qq.autoregressive(mels,n=3)
+    qq = RawDecoder(model=model,tokenizer=tokenizer,device=device)
 
     print(prep(q).shape)
-    # print(seq)
-    # print(qq.get_eot_prob(prep(q)))
-    # print(tokenizer.decode(seq.squeeze()))
-    # print(prep(x).shape)
-    # pred = qq.forward(prep(x),sot_tokens)
-    # print("SOT tokens:",tokenizer.decode(sot_tokens))
-    # print(pred.argmax())
-    # print(tokenizer.decode([pred.argmax()]))
-    # eot_prob1 = qq.get_eot_prob(prep(x))
-    # eot_prob2 = qq.get_eot_prob(prep(q))
-
-    # print(eot_prob1,eot_prob2)
-    
+  
 
     
