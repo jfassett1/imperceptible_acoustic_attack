@@ -63,7 +63,7 @@ if __name__ == "__main__":
     q = AudioDataModule(dataset_name="librispeech")
     dl = q.train_dataloader()
     
-    # for i in range(1):
-    #     l = iter(dl)
-    #     print(next(l)[2])
+    for i in range(1):
+        l = iter(dl)
+        print(next(l)[0].shape)
     # print(librispeech)
