@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Sequence, Tupl
 
 import numpy as np
 import torch
+import torch.nn as nn
 import whisper
 
 if TYPE_CHECKING:
@@ -22,10 +23,13 @@ class RawDecoder():
 
     """
     def __init__(self,model,tokenizer,device):
-        self.model = model
+        super(RawDecoder, self).__init__()
+        self.model = model.to(device)
         self.tokenizer = tokenizer
         self.device = device
         self.sot_tokens = torch.tensor(self.tokenizer.sot_sequence_including_notimestamps).unsqueeze(dim=0).to(self.device)
+    def update_device(self,device):
+        self.model = self.model.to(device)
 
     def forward(self,mel,tokens=None):
         if type(tokens) == None:
@@ -90,6 +94,7 @@ if __name__ == "__main__":
     
 
     mels = torch.cat((prep(q),prep(x)),dim=0).to(device)
+    print(mels.shape)
 
     NAME = "tiny.en"
     tokenizer = whisper.tokenizer.get_tokenizer(multilingual=False,task="transcribe")
@@ -98,7 +103,7 @@ if __name__ == "__main__":
     sot_tokens = torch.tensor(tokenizer.sot_sequence_including_notimestamps).unsqueeze(dim=1).to(device)
     qq = RawDecoder(model=model,tokenizer=tokenizer,device=device)
 
-    print(prep(q).shape)
-  
+    ll = qq.get_eot_prob(mels)
+    print(ll)
 
     
