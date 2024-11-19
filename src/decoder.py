@@ -43,6 +43,7 @@ class RawDecoder():
         logits = self.forward(mel,sot_tokens)
         probs = logits.softmax(dim=-1)
         eot_probs = probs[:,0,eot_id]
+        # print("PROBS",eot_probs)
         return eot_probs
 
 
@@ -53,25 +54,17 @@ class RawDecoder():
         tokens = torch.zeros(size=(batch_size,n + len(sot_tokens)),dtype=torch.int64).to(self.device)
         
         tokens[:,:sot_tokens.shape[1]] = sot_tokens
-        # tokens[]
-        # tokens = torch.transpose(tokens,0,1)
         eot_id = self.tokenizer.eot
         
 
         for i in range(n):
             logits = self.forward(mel,tokens[:,:i+len(sot_tokens)])
-            # print(logits.shape)
-            # print(logits.shape)
             pred = logits[:,-1].argmax(dim=-1)
-
-            # print(pred == eot_id)
             tokens[0:,i+len(sot_tokens)] = pred
             if n == None:
                 if pred == eot_id:
                     break
-            # softmax = logits.softmax(dim=2)
-            # if i == n:
-            #     break
+                
         return tokens
 
             # likelihoods.append(softmax[eot_id])
@@ -104,6 +97,6 @@ if __name__ == "__main__":
     qq = RawDecoder(model=model,tokenizer=tokenizer,device=device)
 
     ll = qq.get_eot_prob(mels)
-    print(ll)
+    # print(ll)
 
     
