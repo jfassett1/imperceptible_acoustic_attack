@@ -8,6 +8,7 @@ from typing import Union
 import time
 from src.data import AudioDataModule
 from src.attacker import MelBasedAttackerLightning
+from src.discriminator import MelDiscriminator
 
 
 
@@ -26,7 +27,9 @@ def get_args():
 
     # Attack Settings
     parser.add_argument('--attack_length',type=float,default=1.,help = "Length of attack in seconds")
-    parser.add_argument('--prepend',type=bool, default = False,help="Whether to prepend or not")
+    parser.add_argument('--prepend',action="store_true", default = False,help="Whether to prepend or not")
+    parser.add_argument('--noise_dir',type=str,default=None,help="Where to save noise outputs")
+    parser.add_argument('--clip_val',type=float,default = -1,help="Clamping Value")
 
     # Data processing
     parser.add_argument('--num_workers', type=int, default=4, help='Number of data loading workers')
@@ -34,9 +37,13 @@ def get_args():
     parser.add_argument("--root_dir",type=str,default=None,help="Path of Root Directory")
 
     # Arguments for Discriminator
-    parser.add_argument("--use_discriminator", type=bool, default=False,help="Whether to use discriminator")
+    parser.add_argument("--use_discriminator", action="store_true",default=False,help="Whether to use discriminator")
     parser.add_argument("--use_pretrained_discriminator",type=bool,default=True,help="Whether to use pretrained discriminator. Will find pre-trained automatically") #TODO: Set up pathing for pretrained discriminators
     parser.add_argument("--lambda",type=float,default=1.,help="Lambda value. Represents strength of discriminator during training") 
+
+    #Arguments for MSE Chunking (will have better name)
+    parser.add_argument("--use_chunkloss",action="store_true",default=False,help="Chunking Loss")
+
 
     # Optimizer and scheduler settings #TODO: Implement these arguments
     parser.add_argument('--optimizer', type=str, default='adam', choices=['adam', 'sgd'], help='Optimizer type')
@@ -66,29 +73,70 @@ def main(args):
         ROOT_DIR = Path(__file__).parent
     else:
         ROOT_DIR = args.root_dir
-    DATA_DIR = ROOT_DIR / "data"
+    # DATA_DIR = ROOT_DIR / "data"
+    if args.noise_dir is None:
+        NOISE_DIR = ROOT_DIR / "noise"
+        NOISE_DIR.mkdir(exist_ok=True) if not NOISE_DIR.exists() else None
+
+    else:
+        NOISE_DIR = args.noise_dir
+
+
     ATTACK_LEN_SEC = args.attack_length
     DISCRIM_PATH = ROOT_DIR / "discriminator"
+
+
+    NOISE_SAVEPATH = NOISE_DIR/"prepend" if args.prepend else NOISE_DIR/"overlay"
+    NOISE_SAVEPATH.mkdir(exist_ok=True)
+
     if not DISCRIM_PATH.exists():
         DISCRIM_PATH.mkdir()
 
+
+
+
+        
+
+
+
+    #OBJECTIVE FUNCTION ARGS
+    #------------------------------------------------------------------------------------------#
+
+    assert not (args.use_discriminator and args.use_chunkloss),"Can use EITHER discriminator or chunkloss"
+    if args.use_discriminator:
+        discriminator = MelDiscriminator()
+        NOISE_SAVEPATH = NOISE_SAVEPATH / "discriminator"
+        NOISE_SAVEPATH.mkdir(exist_ok=True)
+    else:
+        discriminator = None
+
+    if args.use_pretrained_discriminator and args.use_discriminator:
+        discrim_weights = torch.load(ROOT_DIR/"discriminator" / f"discriminator_{int(ATTACK_LEN_SEC*100)}tsteps.pth",weights_only=True)
+
+        discriminator.load_state_dict(discrim_weights)
 
     #MODULE SETUP
     #------------------------------------------------------------------------------------------#
     gpu_list = [int(gpu) for gpu in args.gpus.split(',')]
 
-    attacker = MelBasedAttackerLightning(sec=ATTACK_LEN_SEC,prepend=args.prepend)
+    attacker = MelBasedAttackerLightning(sec=ATTACK_LEN_SEC,
+                                         prepend=args.prepend,
+                                         batch_size=args.batch_size,
+                                         discriminator=discriminator,
+                                         epsilon=args.clip_val)
     data_module = AudioDataModule(dataset_name=args.dataset,batch_size=args.batch_size,num_workers=args.num_workers)
 
     trainer = Trainer(max_epochs=args.epochs,devices=gpu_list)
     trainer.fit(attacker,data_module)
 
+    print(f"Saving to {NOISE_SAVEPATH}/noise.pth")
+    print(f"Saving to {NOISE_SAVEPATH}/noise.np.npy")
 
-    torch.save(attacker.noise,"/home/jaydenfassett/audioversarial/imperceptible/tempattacks/noise.pth")
+    torch.save(attacker.noise,f"{NOISE_SAVEPATH}/noise.pth")
+    attacker.dump(f"{NOISE_SAVEPATH}/noise.np.npy")
 
 
 
 if __name__ == "__main__":
     args  = get_args()
-    print(args)
     main(args)
