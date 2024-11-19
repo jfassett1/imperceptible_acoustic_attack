@@ -5,13 +5,13 @@ Trainable Attacker class
 """
 import torch
 import torch.nn as nn
-import pytorch_lightning as pl
 from .decoder import RawDecoder
-from typing import Union
+from typing import Union, Optional
 from whisper import pad_or_trim, log_mel_spectrogram
 from pathlib import Path
-from .utils import raw_to_mel,sample_mel
 from pytorch_lightning import LightningModule
+import numpy as np
+import librosa
 import whisper
 
 
@@ -24,7 +24,10 @@ class MelBasedAttackerLightning(LightningModule):
                  model:str = "tiny.en",
                  sec: Union[int, float] = 1,
                  prepend: bool = True,
-                 target_length: int = 48000):
+                 epsilon: float = 0.02,
+                 target_length: int = 48000,
+                 batch_size: int = 64,
+                 discriminator = Optional[nn.Module]):
         super(MelBasedAttackerLightning, self).__init__()
 
         # Initialize noise as a learnable parameter
@@ -33,6 +36,10 @@ class MelBasedAttackerLightning(LightningModule):
         self.target_length = target_length
         self.noise_len = int(sec * 100)
         self.model = whisper.load_model(model).to(self.device)
+        self.epsilon = epsilon
+        self.batch_size = batch_size
+
+        self.discriminator = discriminator
 
         #Fix sparse tensors for Pytorch Lightning
         alignment_heads_dense = self.model.get_buffer("alignment_heads").to_dense()
@@ -48,6 +55,7 @@ class MelBasedAttackerLightning(LightningModule):
         #Freezing Whisper weights
         for param in self.model.parameters():
             param.requires_grad = False
+
     def to(self, device):
         #Updated to function
         super().to(device)
@@ -62,25 +70,44 @@ class MelBasedAttackerLightning(LightningModule):
         x = x.to(self.device)
         BATCH_SIZE = x.shape[0]
         # Optionally prepend the noise
-        x = pad_or_trim(x)
-        x = log_mel_spectrogram(x)
         if self.prepend:
             #Slice noise sized chunk from x & add noise
             x = x[:,:,:-self.noise_len]
             noise = self.noise.repeat(BATCH_SIZE,1,1)
             x = torch.cat([noise, x], dim=-1)
+
+
+
+        else: #Adding Noise to tensor
+            # pad_size = x.size(2) - noise.size(2)
+            padding = torch.zeros_like(x)[:,:,:-self.noise_len]
+            noise = self.noise.repeat(BATCH_SIZE,1,1)
+
+            noise_padded = torch.cat([noise,padding],dim=-1)
+            x = noise_padded + x
+
         return self.decoder.get_eot_prob(x)
+    
+    # Clamps to epsilon before passing to optimizer
+    def on_before_optimizer_step(self, optimizer):
+        if self.epsilon != -1:
+            with torch.no_grad():
+                self.noise.clamp_(max=self.epsilon)
+
 
     def training_step(self, batch, batch_idx):
         # Unpack the batch
         x, sampling_rate, transcript = batch
 
-        x = self.forward(x)
+        x = pad_or_trim(x)
+        x = log_mel_spectrogram(x)
+        # probs = self.forward(x) #Gets probabilities
 
-        loss = -torch.log(x + 1e-9).mean()
-        # print(f"Training loss: {loss.item()}")  # Debug print
-        # print(loss.shape)
-        self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
+        if self.discriminator is not None:
+            loss = -torch.log(self.forward(x) + 1e-9).mean() + self.discriminator(self.noise)
+        else:
+            loss = -torch.log(self.forward(x) + 1e-9).mean()
+        self.log("train_loss", loss, batch_size=self.batch_size,prog_bar=True, on_step=True, on_epoch=True)
         return loss
 
     def configure_optimizers(self):
@@ -88,26 +115,45 @@ class MelBasedAttackerLightning(LightningModule):
         return optimizer
 
     def dump(self, path: Union[str, Path], mel: bool = False):
-            pass
+            log_mel_spec = self.noise
+            mel_spec = torch.exp(log_mel_spec).detach().cpu().numpy()
+    # Whisper audio parameters
+            sample_rate = 16000
+            n_fft = 400
+            hop_length = 160
+            win_length = 400
+            n_mels = 80
+            mel_fmin = 0
+            mel_fmax = sample_rate / 2  # 8000 Hz
+            S = librosa.feature.inverse.mel_to_stft(
+                mel_spec,
+                sr=sample_rate,
+                n_fft=n_fft,
+                power=1.0,  # Since we're dealing with magnitude spectrograms
+                fmin=mel_fmin,
+                fmax=mel_fmax,
+                htk=True  # Use HTK formula as Whisper does
 
+    )
+            y = librosa.griffinlim(
+                S,
+                n_iter=60,  # Increased iterations for better quality
+                hop_length=hop_length,
+                win_length=win_length,
+                window='hann',
+                n_fft=n_fft
+            )
+            np.save(path,y)
+            return 
 if __name__ == "__main__":
     device = "cuda"
-    model = MelBasedAttackerLightning().to(device)
+    model = MelBasedAttackerLightning(prepend=False).to(device)
 
     x = whisper.load_audio("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")
     x = torch.tensor(x).unsqueeze(0)
     x = torch.cat([x,x,x,x],dim=0)
-    print(x.shape)
-    x = (x,1,1)
-    # print(x.shape)
 
-    # x = raw_to_mel(x)
-    for name, param in model.named_parameters():
-        print(f"Name: {name}, Shape: {param.shape}, Requires Grad: {param.requires_grad}")
-
-    # print(model.parameters())
-    # qq = model.training_step(x,1)
-    # print(qq)
-    # qq = model(sample_mel)
-
+    q = model(x)
+    print(model.dump("/home/jaydenfassett/audioversarial/imperceptible/nutsack.np.npy"))
+    # x = (x,1,1)
 
