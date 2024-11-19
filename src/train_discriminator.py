@@ -36,7 +36,7 @@ def train_mel(discriminator,
 
 
     attack_n = int(attack_length_sec*100)
-    pbar = tqdm(range(n_epochs),colour="red")
+    pbar = tqdm(range(n_epochs))
     for epoch in pbar:
 
         losses = []
@@ -73,7 +73,10 @@ def train_mel(discriminator,
         avg_loss = running_loss / len(dataloader)
         losses.append(loss.item())
         pbar.set_description(f"Loss = {avg_loss:.4f}")
+    output_dir = save_dir / f"discriminator_{attack_n}tsteps.pth"
+    print(f"Saving at {output_dir}")
 
+    torch.save(discriminator.state_dict(), output_dir)
         # tqdm.write(f"Loss = {avg_loss:.4f}")
     return
 
@@ -81,8 +84,14 @@ if __name__ == "__main__":
     MODEL_DIR = Path(__file__).parent.parent / "discriminator"
     D = MelDiscriminator().to("cuda")
     train_mel(D,MODEL_DIR,n_epochs=3,device="cuda")
+    # weights = torch.load(MODEL_DIR / "discriminator_weights.pth",weights_only=True)
+    # D.load_state_dict(weights)
 
 
-    print(D(torch.randn((1,1,80,100)).to("cuda")))
-    # print(f"Saving to {MODEL_DIR}/discriminator_weights.pth")
-    # torch.save(D.state_dict(),MODEL_DIR/"discriminator_weights.pth")
+
+    aud = AudioDataModule().val_dataloader()
+
+    samp = next(iter(aud))
+    samp = log_mel_spectrogram(pad_or_trim(samp[0]))[:,:,:100].unsqueeze(1).to("cuda")
+    print(samp.shape)
+    print(D(samp).mean())
