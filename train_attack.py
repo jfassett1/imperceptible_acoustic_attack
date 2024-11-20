@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Union
 import time
 from src.data import AudioDataModule
-from src.attacker import MelBasedAttackerLightning
+from src.attacker import MelBasedAttackerLightning, RawAudioAttackerLightning
 from src.discriminator import MelDiscriminator
 
 
@@ -26,6 +26,7 @@ def get_args():
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
 
     # Attack Settings
+    parser.add_argument('--domain',type=str,default="raw_audio",choices=['raw_audio',"mel"],help="Whether to attack in mel or audio space")
     parser.add_argument('--attack_length',type=float,default=1.,help = "Length of attack in seconds")
     parser.add_argument('--prepend',action="store_true", default = False,help="Whether to prepend or not")
     parser.add_argument('--noise_dir',type=str,default=None,help="Where to save noise outputs")
@@ -85,8 +86,9 @@ def main(args):
     ATTACK_LEN_SEC = args.attack_length
     DISCRIM_PATH = ROOT_DIR / "discriminator"
 
-
-    NOISE_SAVEPATH = NOISE_DIR/"prepend" if args.prepend else NOISE_DIR/"overlay"
+    NOISE_SAVEPATH = NOISE_DIR / args.domain
+    NOISE_SAVEPATH.mkdir(exist_ok=True) if not NOISE_SAVEPATH.exists() else None
+    NOISE_SAVEPATH = NOISE_SAVEPATH/"prepend" if args.prepend else NOISE_SAVEPATH/"overlay"
     NOISE_SAVEPATH.mkdir(exist_ok=True)
 
     if not DISCRIM_PATH.exists():
@@ -119,21 +121,29 @@ def main(args):
     #------------------------------------------------------------------------------------------#
     gpu_list = [int(gpu) for gpu in args.gpus.split(',')]
 
-    attacker = MelBasedAttackerLightning(sec=ATTACK_LEN_SEC,
-                                         prepend=args.prepend,
-                                         batch_size=args.batch_size,
-                                         discriminator=discriminator,
-                                         epsilon=args.clip_val)
+    if args.domain == "mel":
+        attacker = MelBasedAttackerLightning(sec=ATTACK_LEN_SEC,
+                                            prepend=args.prepend,
+                                            batch_size=args.batch_size,
+                                            discriminator=discriminator,
+                                            epsilon=args.clip_val)
+    elif args.domain == "raw_audio":
+        attacker = RawAudioAttackerLightning(sec=ATTACK_LEN_SEC,
+                                            prepend=args.prepend,
+                                            batch_size=args.batch_size,
+                                            discriminator=discriminator,
+                                            epsilon=args.clip_val)
+
     data_module = AudioDataModule(dataset_name=args.dataset,batch_size=args.batch_size,num_workers=args.num_workers)
 
     trainer = Trainer(max_epochs=args.epochs,devices=gpu_list)
     trainer.fit(attacker,data_module)
 
-    print(f"Saving to {NOISE_SAVEPATH}/noise.pth")
-    print(f"Saving to {NOISE_SAVEPATH}/noise.np.npy")
+    print(f"Saving to {NOISE_SAVEPATH}/noise_{int(ATTACK_LEN_SEC*100)}tsteps.pth")
+    print(f"Saving to {NOISE_SAVEPATH}/noise_{int(ATTACK_LEN_SEC*100)}tsteps.np.npy")
 
-    torch.save(attacker.noise,f"{NOISE_SAVEPATH}/noise.pth")
-    attacker.dump(f"{NOISE_SAVEPATH}/noise.np.npy")
+    torch.save(attacker.noise,f"{NOISE_SAVEPATH}/noise_{int(ATTACK_LEN_SEC*100)}tsteps.pth")
+    attacker.dump(f"{NOISE_SAVEPATH}/noise_{int(ATTACK_LEN_SEC*100)}tsteps.np.npy")
 
 
 
