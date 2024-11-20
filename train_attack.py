@@ -31,6 +31,7 @@ def get_args():
     parser.add_argument('--prepend',action="store_true", default = False,help="Whether to prepend or not")
     parser.add_argument('--noise_dir',type=str,default=None,help="Where to save noise outputs")
     parser.add_argument('--clip_val',type=float,default = -1,help="Clamping Value")
+    parser.add_argument('--gamma',type=float,default = 1., help= "Gamma value for scaling penalty")
 
     # Data processing
     parser.add_argument('--num_workers', type=int, default=4, help='Number of data loading workers')
@@ -96,7 +97,6 @@ def main(args):
 
 
 
-
         
 
 
@@ -126,13 +126,17 @@ def main(args):
                                             prepend=args.prepend,
                                             batch_size=args.batch_size,
                                             discriminator=discriminator,
-                                            epsilon=args.clip_val)
+                                            epsilon=args.clip_val,
+                                            gamma = args.gamma)
     elif args.domain == "raw_audio":
         attacker = RawAudioAttackerLightning(sec=ATTACK_LEN_SEC,
                                             prepend=args.prepend,
                                             batch_size=args.batch_size,
                                             discriminator=discriminator,
-                                            epsilon=args.clip_val)
+                                            epsilon=args.clip_val,
+                                            gamma = args.gamma
+                                            )
+    
 
     data_module = AudioDataModule(dataset_name=args.dataset,batch_size=args.batch_size,num_workers=args.num_workers)
 

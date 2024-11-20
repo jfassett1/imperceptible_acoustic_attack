@@ -28,7 +28,8 @@ class MelBasedAttackerLightning(LightningModule):
                  target_length: int = 48000,
                  batch_size: int = 64,
                  discriminator = Optional[nn.Module],
-                 noise_type: str = "uniform" #Options are ['uniform','normal']
+                 noise_type: str = "uniform", #Options are ['uniform','normal']
+                 gamma: float = 1.,
 ):
         super(MelBasedAttackerLightning, self).__init__()
 
@@ -40,6 +41,7 @@ class MelBasedAttackerLightning(LightningModule):
         self.model = whisper.load_model(model).to(self.device)
         self.epsilon = epsilon
         self.batch_size = batch_size
+        self.gamma = gamma
 
         self.discriminator = discriminator
 
@@ -107,7 +109,7 @@ class MelBasedAttackerLightning(LightningModule):
         # probs = self.forward(x) #Gets probabilities
 
         if self.discriminator is not None:
-            loss = -torch.log(self.forward(x) + 1e-9).mean() + self.discriminator(self.noise)
+            loss = -torch.log(self.forward(x) + 1e-9).mean() + self.gamma * self.discriminator(self.noise)
         else:
             loss = -torch.log(self.forward(x) + 1e-9).mean()
         self.log("train_loss", loss, batch_size=self.batch_size,prog_bar=True, on_step=True, on_epoch=True)
@@ -164,7 +166,8 @@ class RawAudioAttackerLightning(LightningModule):
                  target_length: int = 48000,
                  batch_size: int = 64,
                  discriminator = Optional[nn.Module],
-                 noise_type: str = "uniform" #Options are ['uniform','normal']
+                 noise_type: str = "uniform", #Options are ['uniform','normal']
+                 gamma: float = 1.
 ):
         super(RawAudioAttackerLightning, self).__init__()
 
@@ -176,6 +179,7 @@ class RawAudioAttackerLightning(LightningModule):
         self.model = whisper.load_model(model).to(self.device)
         self.epsilon = epsilon
         self.batch_size = batch_size
+        self.gamma = gamma
 
         self.discriminator = discriminator
 
@@ -245,7 +249,7 @@ class RawAudioAttackerLightning(LightningModule):
         # probs = self.forward(x) #Gets probabilities
 
         if self.discriminator is not None:
-            loss = -torch.log(self.forward(x) + 1e-9).mean() + self.discriminator(log_mel_spectrogram(self.noise))
+            loss = -torch.log(self.forward(x) + 1e-9).mean() + self.gamma * self.discriminator(log_mel_spectrogram(self.noise))
         else:
             loss = -torch.log(self.forward(x) + 1e-9).mean()
         self.log("train_loss", loss, batch_size=self.batch_size,prog_bar=True, on_step=True, on_epoch=True)
