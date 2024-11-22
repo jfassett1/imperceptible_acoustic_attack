@@ -30,6 +30,7 @@ class MelBasedAttackerLightning(LightningModule):
                  discriminator = Optional[nn.Module],
                  noise_type: str = "uniform", #Options are ['uniform','normal']
                  gamma: float = 1.,
+                 no_speech: bool = False,
 ):
         super(MelBasedAttackerLightning, self).__init__()
 
@@ -42,8 +43,14 @@ class MelBasedAttackerLightning(LightningModule):
         self.epsilon = epsilon
         self.batch_size = batch_size
         self.gamma = gamma
+        self.no_speech = no_speech
 
         self.discriminator = discriminator
+
+
+        if self.discriminator is not None:
+            for param in self.discriminator.parameters():
+                param.requires_grad = False
 
         #Fix sparse tensors for Pytorch Lightning
         alignment_heads_dense = self.model.get_buffer("alignment_heads").to_dense()
@@ -89,8 +96,7 @@ class MelBasedAttackerLightning(LightningModule):
 
             noise_padded = torch.cat([noise,padding],dim=-1)
             x = noise_padded + x
-
-        return self.decoder.get_eot_prob(x)
+            return self.decoder.get_eot_prob(x)
     
     # Clamps to epsilon before passing to optimizer
     def on_before_optimizer_step(self, optimizer):
@@ -110,6 +116,7 @@ class MelBasedAttackerLightning(LightningModule):
 
         if self.discriminator is not None:
             loss = -torch.log(self.forward(x) + 1e-9).mean() + self.gamma * self.discriminator(self.noise)
+
         else:
             loss = -torch.log(self.forward(x) + 1e-9).mean()
         self.log("train_loss", loss, batch_size=self.batch_size,prog_bar=True, on_step=True, on_epoch=True)
@@ -167,7 +174,8 @@ class RawAudioAttackerLightning(LightningModule):
                  batch_size: int = 64,
                  discriminator = Optional[nn.Module],
                  noise_type: str = "uniform", #Options are ['uniform','normal']
-                 gamma: float = 1.
+                 gamma: float = 1.,
+                 no_speech: bool = False
 ):
         super(RawAudioAttackerLightning, self).__init__()
 
@@ -180,6 +188,8 @@ class RawAudioAttackerLightning(LightningModule):
         self.epsilon = epsilon
         self.batch_size = batch_size
         self.gamma = gamma
+
+        self.no_speech = no_speech
 
         self.discriminator = discriminator
 
@@ -197,6 +207,14 @@ class RawAudioAttackerLightning(LightningModule):
         #Freezing Whisper weights
         for param in self.model.parameters():
             param.requires_grad = False
+
+        if self.discriminator is not None:
+            for param in self.discriminator.parameters():
+                param.requires_grad = False
+
+
+
+        
 
     def to(self, device):
         #Updated to function
@@ -249,9 +267,12 @@ class RawAudioAttackerLightning(LightningModule):
         # probs = self.forward(x) #Gets probabilities
 
         if self.discriminator is not None:
-            loss = -torch.log(self.forward(x) + 1e-9).mean() + self.gamma * self.discriminator(log_mel_spectrogram(self.noise))
+            loss = -torch.log(self.forward(x)[0] + 1e-9).mean() + self.gamma * self.discriminator(log_mel_spectrogram(self.noise))
+        elif self.no_speech:
+            eot_prob, no_speech_prob = self.forward(x)
+            loss = -torch.log(eot_prob + 1e-9).mean() + self.gamma * -torch.log(no_speech_prob + 1e-9).mean()
         else:
-            loss = -torch.log(self.forward(x) + 1e-9).mean()
+            loss = -torch.log(self.forward(x)[0] + 1e-9).mean()
         self.log("train_loss", loss, batch_size=self.batch_size,prog_bar=True, on_step=True, on_epoch=True)
         return loss
 

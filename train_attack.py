@@ -32,6 +32,7 @@ def get_args():
     parser.add_argument('--noise_dir',type=str,default=None,help="Where to save noise outputs")
     parser.add_argument('--clip_val',type=float,default = -1,help="Clamping Value")
     parser.add_argument('--gamma',type=float,default = 1., help= "Gamma value for scaling penalty")
+    parser.add_argument("--no_speech",action="store_true",default=False,help="Whether to use Nospeech in loss function")
 
     # Data processing
     parser.add_argument('--num_workers', type=int, default=4, help='Number of data loading workers')
@@ -41,7 +42,7 @@ def get_args():
     # Arguments for Discriminator
     parser.add_argument("--use_discriminator", action="store_true",default=False,help="Whether to use discriminator")
     parser.add_argument("--use_pretrained_discriminator",type=bool,default=True,help="Whether to use pretrained discriminator. Will find pre-trained automatically") #TODO: Set up pathing for pretrained discriminators
-    parser.add_argument("--lambda",type=float,default=1.,help="Lambda value. Represents strength of discriminator during training") 
+    # parser.add_argument("--lambda",type=float,default=1.,help="Lambda value. Represents strength of discriminator during training") 
 
     #Arguments for MSE Chunking (will have better name)
     parser.add_argument("--use_chunkloss",action="store_true",default=False,help="Chunking Loss")
@@ -57,6 +58,9 @@ def get_args():
     parser.add_argument('--device', type=str, default='cuda', choices=['cpu','cuda'], help='Device to use for training')
     parser.add_argument('--gpus', type=str, default='0', help='Comma-separated list of GPU IDs to use for training')
     parser.add_argument('--distributed', action='store_true', help='Enable distributed training')
+
+    #Saving Settings
+    parser.add_argument('--show',action="store_true",default=False,help="Whether to save image")
 
     # Debugging and testing
     # parser.add_argument('--debug', action='store_true', help='Run in debug mode with minimal data')
@@ -104,7 +108,8 @@ def main(args):
     #OBJECTIVE FUNCTION ARGS
     #------------------------------------------------------------------------------------------#
 
-    assert not (args.use_discriminator and args.use_chunkloss),"Can use EITHER discriminator or chunkloss"
+        assert sum([args.use_discriminator, args.use_chunkloss, args.no_speech]) <= 1, \
+            "Can use EITHER discriminator or chunkloss or no speech"    
     if args.use_discriminator:
         discriminator = MelDiscriminator()
         NOISE_SAVEPATH = NOISE_SAVEPATH / "discriminator"
@@ -127,14 +132,16 @@ def main(args):
                                             batch_size=args.batch_size,
                                             discriminator=discriminator,
                                             epsilon=args.clip_val,
-                                            gamma = args.gamma)
+                                            gamma = args.gamma,
+                                            no_speech=args.no_speech)
     elif args.domain == "raw_audio":
         attacker = RawAudioAttackerLightning(sec=ATTACK_LEN_SEC,
                                             prepend=args.prepend,
                                             batch_size=args.batch_size,
                                             discriminator=discriminator,
                                             epsilon=args.clip_val,
-                                            gamma = args.gamma
+                                            gamma = args.gamma,
+                                            no_speech=args.no_speech
                                             )
     
 

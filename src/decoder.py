@@ -37,14 +37,19 @@ class RawDecoder():
             
         return self.model.forward(mel,tokens)
     
-    def get_eot_prob(self,mel):
+    def get_eot_prob(self,mel,no_speech: bool = False):
+        """
+        Runs inference pass on Whisper and returns (<|endoftranscript|>, <|nospeech|> probabilities)
+        """
         eot_id = self.tokenizer.eot
+        no_speech_id = self.tokenizer.no_speech
         sot_tokens = torch.tensor(self.tokenizer.sot_sequence_including_notimestamps).unsqueeze(dim=0).to(self.device)
         logits = self.forward(mel,sot_tokens)
         probs = logits.softmax(dim=-1)
         eot_probs = probs[:,0,eot_id]
+        no_speech_probs = probs[:,0,no_speech_id]
         # print("PROBS",eot_probs)
-        return eot_probs
+        return eot_probs,no_speech_probs
 
 
 
