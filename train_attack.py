@@ -1,6 +1,7 @@
 import torch
 import pytorch_lightning
 import argparse
+import numpy as np
 from tqdm import tqdm
 from pytorch_lightning import Trainer
 from pathlib import Path
@@ -19,7 +20,7 @@ def get_args():
     parser = argparse.ArgumentParser(description="Training Script Arguments")
 
     # General training settings
-    parser.add_argument('--epochs', type=int, default=30, help='Number of training epochs')
+    parser.add_argument('--epochs', type=int, default=1, help='Number of training epochs')
     parser.add_argument('--batch_size', type=int, default=128, help='Batch size for training')
     parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate for optimizer')
     parser.add_argument('--weight_decay', type=float, default=1e-5, help='Weight decay (L2 regularization)')
@@ -35,17 +36,17 @@ def get_args():
     parser.add_argument("--no_speech",action="store_true",default=False,help="Whether to use Nospeech in loss function")
 
     # Data processing
-    parser.add_argument('--num_workers', type=int, default=4, help='Number of data loading workers')
+    parser.add_argument('--num_workers', type=int, default=0, help='Number of data loading workers')
     parser.add_argument('--dataset',type=str, default="librispeech",choices=['librispeech'], help="Which dataset to use") #TODO: Add support for more datasets.
     parser.add_argument("--root_dir",type=str,default=None,help="Path of Root Directory")
 
-    # Arguments for Discriminator
+    # Arguments for Discriminator TODO: Either make better or remove
     parser.add_argument("--use_discriminator", action="store_true",default=False,help="Whether to use discriminator")
     parser.add_argument("--use_pretrained_discriminator",type=bool,default=True,help="Whether to use pretrained discriminator. Will find pre-trained automatically") #TODO: Set up pathing for pretrained discriminators
     # parser.add_argument("--lambda",type=float,default=1.,help="Lambda value. Represents strength of discriminator during training") 
 
     #Arguments for MSE Chunking (will have better name)
-    parser.add_argument("--use_chunkloss",action="store_true",default=False,help="Chunking Loss")
+    parser.add_argument("--use_chunkloss",action="store_true",default=False,help="Chunking Loss") # NOTE: Deprecated. Will be removing all mentioning
 
 
     # Optimizer and scheduler settings #TODO: Implement these arguments
@@ -87,14 +88,15 @@ def main(args):
     else:
         NOISE_DIR = args.noise_dir
 
+    DIRECTORY_STRUCTURE = Path("") # General directory structure which is re-used for saving different files like noise, image, etc
 
     ATTACK_LEN_SEC = args.attack_length
     DISCRIM_PATH = ROOT_DIR / "discriminator"
 
-    NOISE_SAVEPATH = NOISE_DIR / args.domain
-    NOISE_SAVEPATH.mkdir(exist_ok=True) if not NOISE_SAVEPATH.exists() else None
-    NOISE_SAVEPATH = NOISE_SAVEPATH/"prepend" if args.prepend else NOISE_SAVEPATH/"overlay"
-    NOISE_SAVEPATH.mkdir(exist_ok=True)
+    DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE / args.domain
+    # NOISE_SAVEPATH.mkdir(exist_ok=True) if not NOISE_SAVEPATH.exists() else None
+    DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE/"prepend" if args.prepend else DIRECTORY_STRUCTURE/"overlay"
+    # NOISE_SAVEPATH.mkdir(exist_ok=True)
 
     if not DISCRIM_PATH.exists():
         DISCRIM_PATH.mkdir()
@@ -112,8 +114,7 @@ def main(args):
             "Can use EITHER discriminator or chunkloss or no speech"    
     if args.use_discriminator:
         discriminator = MelDiscriminator()
-        NOISE_SAVEPATH = NOISE_SAVEPATH / "discriminator"
-        NOISE_SAVEPATH.mkdir(exist_ok=True)
+        DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE / "discriminator"
     else:
         discriminator = None
 
@@ -150,11 +151,27 @@ def main(args):
     trainer = Trainer(max_epochs=args.epochs,devices=gpu_list)
     trainer.fit(attacker,data_module)
 
-    print(f"Saving to {NOISE_SAVEPATH}/noise_{int(ATTACK_LEN_SEC*100)}tsteps.pth")
-    print(f"Saving to {NOISE_SAVEPATH}/noise_{int(ATTACK_LEN_SEC*100)}tsteps.np.npy")
+    file_name = f"noise_{int(ATTACK_LEN_SEC*100)}tsteps"
+
+    NOISE_SAVEPATH = NOISE_DIR / DIRECTORY_STRUCTURE
+    NOISE_SAVEPATH.mkdir(exist_ok=True,parents=True)
+
+    print(f"Saving to {NOISE_SAVEPATH}/{file_name}.pth")
+    print(f"Saving to {NOISE_SAVEPATH}/{file_name}.np.npy")
 
     torch.save(attacker.noise,f"{NOISE_SAVEPATH}/noise_{int(ATTACK_LEN_SEC*100)}tsteps.pth")
     attacker.dump(f"{NOISE_SAVEPATH}/noise_{int(ATTACK_LEN_SEC*100)}tsteps.np.npy")
+    if args.show:
+        from src.utils import save_photo_overlay # Jack would hate me for this, but I like importing things as I need them
+        from scipy.io import wavfile
+        EXAMPLE_SAVEPATH = ROOT_DIR / "examples" / DIRECTORY_STRUCTURE
+        EXAMPLE_SAVEPATH.mkdir(exist_ok=True,parents=True)
+        noise = attacker.noise.detach().cpu().numpy().squeeze()
+        sample_audio = wavfile.read(ROOT_DIR/"original_audio.wav")[1]
+        # print("AUDIO SHAPE",sample_audio.shape)
+        # print("NOISE SHAPE",noise.shape)
+        print(f"Saving image to {EXAMPLE_SAVEPATH/'plot.png'}")
+        save_photo_overlay(noise,sample_audio,EXAMPLE_SAVEPATH/"plot.png")
 
 
 
