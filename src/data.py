@@ -12,8 +12,8 @@ data_dir = root_dir / "data"
 
 # print(root_dir)
 librispeech = torchaudio.datasets.LIBRISPEECH(data_dir,
-                                 'dev-clean',
-                                   'LibriSpeech',
+                                #  'dev-clean',
+                                    'train-clean-100',
                                      download = True)
 
 class AudioDataModule(pl.LightningDataModule):
@@ -28,8 +28,8 @@ class AudioDataModule(pl.LightningDataModule):
         # Download the dataset if it is not already available
         if self.dataset_name == "librispeech":
             self.dataset = torchaudio.datasets.LIBRISPEECH(data_dir,
-                                 'dev-clean',
-                                   'LibriSpeech',
+                                # 'dev-clean',
+                                'train-clean-100',
                                      download = True)
     
     def setup(self, stage=None):
