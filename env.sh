@@ -8,9 +8,9 @@ conda activate imperceptible
 
 # Install PyTorch with CUDA (if required) and other packages
 conda install pytorch torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c nvidia -y
-conda install pytorch-lightning -c conda-forge
+conda install pytorch-lightning -c conda-forge -y
 conda install matplotlib -y
-conda install scipy -y
-conda install librosa -y
+# conda install scipy -y
+# conda install librosa -y
 pip install openai-whisper==20240930
 
