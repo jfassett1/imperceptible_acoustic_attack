@@ -6,7 +6,7 @@ Trainable Attacker classes
 import torch
 import torch.nn as nn
 from .decoder import RawDecoder
-from typing import Union, Optional
+from typing import Union, Optional, Literal
 from whisper import pad_or_trim, log_mel_spectrogram
 from pathlib import Path
 from pytorch_lightning import LightningModule
@@ -15,8 +15,8 @@ import librosa
 import whisper
 
 
-class MelBasedAttackerLightning(LightningModule):
-    """
+class MelBasedAttackerLightning(LightningModule): #NOTE: DEPRECATED
+    """ DEPRECATED, TODO: Make MEL an option of a general attacker class
     LightningModule that prepends noise for adversarial attacks, based on
     https://arxiv.org/pdf/2405.06134
     """
@@ -57,7 +57,7 @@ class MelBasedAttackerLightning(LightningModule):
         self.model.register_buffer("alignment_heads", alignment_heads_dense, persistent=False)
         del alignment_heads_dense
 
-
+        #Different tokenizers for English vs multilingual models
         if "en" in model:
             self.tokenizer = whisper.tokenizer.get_tokenizer(multilingual=False,task="transcribe")
         else:
@@ -175,22 +175,27 @@ class RawAudioAttackerLightning(LightningModule):
                  discriminator = Optional[nn.Module],
                  noise_type: str = "uniform", #Options are ['uniform','normal']
                  gamma: float = 1.,
-                 no_speech: bool = False
+                 no_speech: bool = False,
+                 frequency_decay: tuple = (None,None)
+                 
 ):
         super(RawAudioAttackerLightning, self).__init__()
 
         # Initialize noise as a learnable parameter
         self.noise = nn.Parameter(torch.rand(1, int(sec*16000)), requires_grad=True).to(self.device)
+
+        #General hyperparameters for attack
         self.prepend = prepend
         self.target_length = target_length
         self.noise_len = int(sec * 16000)
         self.model = whisper.load_model(model).to(self.device)
-        self.epsilon = epsilon
         self.batch_size = batch_size
+
+        # Imperceptibility parameters
+        self.epsilon = epsilon
         self.gamma = gamma
-
+        self.freq_decay, self.decay_strength = frequency_decay
         self.no_speech = no_speech
-
         self.discriminator = discriminator
 
         #Fix sparse tensors for Pytorch Lightning
@@ -214,10 +219,33 @@ class RawAudioAttackerLightning(LightningModule):
 
 
 
+    def frequency_decay(self,
+                          mel,
+                          transformation: Literal['linear','polynomial','exponential'] = 'linear'): #TODO: Add support for more than just linspace
+        """
+        Adds values to gradients to penalize higher frequencies
+        Mel Spectrograms are (1, 80, T)
+        TODO: Bring pattern initialization outside of this function. Currently it is re-initialized every time 
         
+        """
+        if transformation == "linear":
+            pattern = torch.linspace(0,1,steps=80).to(self.device) * self.decay_strength
+
+        elif transformation == 'polynomial':
+            pattern = torch.pow(torch.linspace(0,1,steps=80).to(self.device),2) * self.decay_strength
+
+        elif transformation == "exponential" or transformation == 'polynomial':
+            raise NotImplementedError
+
+        else: #Return unchanged if no transformation
+            return mel
+        #Finish pattern
+        pattern = pattern.resize(1,80,1)
+        pattern = pattern.expand_as(mel)
+        return mel + pattern
 
     def to(self, device):
-        #Updated to function
+        #Updated 'to' function. Updates device of submodules
         super().to(device)
 
         self.noise = self.noise.to(device)
@@ -241,6 +269,7 @@ class RawAudioAttackerLightning(LightningModule):
         else: #Adding Noise to tensor
             # pad_size = x.size(2) - noise.size(2)
             noise = log_mel_spectrogram(self.noise)
+            noise = self.frequency_decay(noise,self.freq_decay)
             noise = noise.repeat(BATCH_SIZE,1,1)
 
             padding = torch.zeros_like(x)[:,:,:-noise.shape[-1]]
@@ -272,7 +301,7 @@ class RawAudioAttackerLightning(LightningModule):
             eot_prob, no_speech_prob = self.forward(x)
             loss = -torch.log(eot_prob + 1e-9).mean() + self.gamma * -torch.log(no_speech_prob + 1e-9).mean()
         else:
-            loss = -torch.log(self.forward(x)[0] + 1e-9).mean()
+            loss = -torch.log(self.forward( x)[0] + 1e-9).mean()
         self.log("train_loss", loss, batch_size=self.batch_size,prog_bar=True, on_step=True, on_epoch=True)
         return loss
 

@@ -5,7 +5,7 @@ import numpy as np
 from tqdm import tqdm
 from pytorch_lightning import Trainer
 from pathlib import Path
-from typing import Union
+from typing import Union, Optional, Literal
 import time
 from src.data import AudioDataModule
 from src.attacker import MelBasedAttackerLightning, RawAudioAttackerLightning
@@ -40,16 +40,18 @@ def get_args():
     parser.add_argument('--dataset',type=str, default="librispeech",choices=['librispeech'], help="Which dataset to use") #TODO: Add support for more datasets.
     parser.add_argument("--root_dir",type=str,default=None,help="Path of Root Directory")
 
+    # PENALTY ARGS:
+    #----------------------------------------------------------------------------------------------------------------#
     # Arguments for Discriminator TODO: Either make better or remove
     parser.add_argument("--use_discriminator", action="store_true",default=False,help="Whether to use discriminator")
     parser.add_argument("--use_pretrained_discriminator",type=bool,default=True,help="Whether to use pretrained discriminator. Will find pre-trained automatically") #TODO: Set up pathing for pretrained discriminators
     # parser.add_argument("--lambda",type=float,default=1.,help="Lambda value. Represents strength of discriminator during training") 
-
-    #Arguments for MSE Chunking (will have better name)
-    parser.add_argument("--use_chunkloss",action="store_true",default=False,help="Chunking Loss") # NOTE: Deprecated. Will be removing all mentioning
-
-
+    #Arguments for frequency decay
+    parser.add_argument("--frequency_decay", type = str, choices = ['linear','polynomial','exponential'], default=None, help="Whether to use frequency decay, and what pattern of frequency decay") #TODO: Replace default with whatever works best for final code submission
+    parser.add_argument("--decay_strength",type = float, default = 1., help = "Weight of the frequency decay")
     # Optimizer and scheduler settings #TODO: Implement these arguments
+    #----------------------------------------------------------------------------------------------------------------#
+
     parser.add_argument('--optimizer', type=str, default='adam', choices=['adam', 'sgd'], help='Optimizer type')
     parser.add_argument('--scheduler', type=str, default=None, choices=['step', 'cosine'], help='Learning rate scheduler')
     parser.add_argument('--scheduler_step_size', type=int, default=10, help='Step size for StepLR')
@@ -58,7 +60,6 @@ def get_args():
     # GPU settings
     parser.add_argument('--device', type=str, default='cuda', choices=['cpu','cuda'], help='Device to use for training')
     parser.add_argument('--gpus', type=str, default='0', help='Comma-separated list of GPU IDs to use for training')
-    parser.add_argument('--distributed', action='store_true', help='Enable distributed training')
 
     #Saving Settings
     parser.add_argument('--show',action="store_true",default=False,help="Whether to save image")
@@ -100,17 +101,14 @@ def main(args):
 
     if not DISCRIM_PATH.exists():
         DISCRIM_PATH.mkdir()
-
-
-
-        
-
-
+    if args.frequency_decay is not None:
+        DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE / str(args.frequency_decay)
+        DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE / str(args.decay_strength)
 
     #OBJECTIVE FUNCTION ARGS
     #------------------------------------------------------------------------------------------#
 
-        assert sum([args.use_discriminator, args.use_chunkloss, args.no_speech]) <= 1, \
+        assert sum([args.use_discriminator, args.no_speech]) <= 1, \
             "Can use EITHER discriminator or chunkloss or no speech"    
     if args.use_discriminator:
         discriminator = MelDiscriminator()
@@ -142,7 +140,8 @@ def main(args):
                                             discriminator=discriminator,
                                             epsilon=args.clip_val,
                                             gamma = args.gamma,
-                                            no_speech=args.no_speech
+                                            no_speech=args.no_speech,
+                                            frequency_decay=(args.frequency_decay,args.decay_strength)
                                             )
     
 
