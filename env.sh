@@ -14,3 +14,4 @@ conda install matplotlib -y
 # conda install librosa -y
 pip install openai-whisper==20240930
 
+pip install python-pptx
