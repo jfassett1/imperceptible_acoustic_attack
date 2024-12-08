@@ -50,7 +50,7 @@ def get_args():
     parser.add_argument("--use_pretrained_discriminator",type=bool,default=True,help="Whether to use pretrained discriminator. Will find pre-trained automatically") #TODO: Set up pathing for pretrained discriminators
     # parser.add_argument("--lambda",type=float,default=1.,help="Lambda value. Represents strength of discriminator during training") 
     #Arguments for frequency decay
-    parser.add_argument("--frequency_decay", type = str, choices = ['linear','polynomial','exponential'], default=None, help="Whether to use frequency decay, and what pattern of frequency decay") #TODO: Replace default with whatever works best for final code submission
+    parser.add_argument("--frequency_decay", type = str, choices = ['linear','polynomial','logarithmic','exponential'], default=None, help="Whether to use frequency decay, and what pattern of frequency decay") #TODO: Replace default with whatever works best for final code submission
     parser.add_argument("--decay_strength",type = float, default = 1., help = "Weight of the frequency decay")
     # Optimizer and scheduler settings #TODO: Implement these arguments
     #----------------------------------------------------------------------------------------------------------------#
