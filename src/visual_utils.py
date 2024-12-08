@@ -86,7 +86,6 @@ def normalize_volume(signal1, signal2):
     - numpy.ndarray: The volume-normalized version of signal1.
     """
     # Ensure both signals are NumPy arrays
-    print("q")
     signal1 = np.asarray(signal1)
     signal2 = np.asarray(signal2)
 
