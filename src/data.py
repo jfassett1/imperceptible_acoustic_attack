@@ -7,17 +7,13 @@ from whisper import pad_or_trim
 
 
 root_dir = Path(__file__).parent.parent
-data_dir = root_dir / "data"
+data_dir = Path("/media/drive1/jaydenfassett/audio_data")
+# data_dir = root_dir / "data"
 
 
-# print(root_dir)
-librispeech = torchaudio.datasets.LIBRISPEECH(data_dir,
-                                #  'dev-clean',
-                                    'train-clean-100',
-                                     download = True)
 
 class AudioDataModule(pl.LightningDataModule):
-    def __init__(self, dataset_name="librispeech", batch_size=32, num_workers=4):
+    def __init__(self, dataset_name="librispeech", batch_size=32, num_workers=0):
         super().__init__()
         self.dataset_name = dataset_name
         self.batch_size = batch_size
@@ -25,12 +21,14 @@ class AudioDataModule(pl.LightningDataModule):
 
         self.setup()
     def prepare_data(self):
-        # Download the dataset if it is not already available
-        if self.dataset_name == "librispeech":
-            self.dataset = torchaudio.datasets.LIBRISPEECH(data_dir,
-                                # 'dev-clean',
-                                'train-clean-100',
-                                     download = True)
+        # Download the dataset if it is not already available TODO: Full conditionals
+        # if self.dataset_name == "librispeech":
+        self.dataset = torchaudio.datasets.LIBRISPEECH(data_dir,
+                            # 'dev-clean',
+                            # 'train-clean-100',
+                            self.dataset_name,
+                            # 'train-other-500',
+                                    download = True)
     
     def setup(self, stage=None):
         self.prepare_data()
