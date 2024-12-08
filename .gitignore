@@ -1,4 +1,5 @@
 data/
 lightning_logs/
 noise/
-examples/
+examples/*
+!examples/sample_sounds/
