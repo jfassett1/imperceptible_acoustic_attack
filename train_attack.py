@@ -7,9 +7,11 @@ from pytorch_lightning import Trainer
 from pathlib import Path
 from typing import Union, Optional, Literal
 import time
+from scipy.io import wavfile
 from src.data import AudioDataModule
 from src.attacker import MelBasedAttackerLightning, RawAudioAttackerLightning
 from src.discriminator import MelDiscriminator
+from src.visual_utils import audio_to_img
 
 
 
@@ -25,7 +27,8 @@ def get_args():
     parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate for optimizer')
     parser.add_argument('--weight_decay', type=float, default=1e-5, help='Weight decay (L2 regularization)')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
-
+    parser.add_argument('--dataset',type = str,choices=['dev-clean','train-clean-100','train-other-500'])
+    parser.add_argument("--no_train",action="store_true",default=False,help="Whether to train noise. Used for testing pathing & saving")
     # Attack Settings
     parser.add_argument('--domain',type=str,default="raw_audio",choices=['raw_audio',"mel"],help="Whether to attack in mel or audio space")
     parser.add_argument('--attack_length',type=float,default=1.,help = "Length of attack in seconds")
@@ -37,7 +40,7 @@ def get_args():
 
     # Data processing
     parser.add_argument('--num_workers', type=int, default=0, help='Number of data loading workers')
-    parser.add_argument('--dataset',type=str, default="librispeech",choices=['librispeech'], help="Which dataset to use") #TODO: Add support for more datasets.
+    # parser.add_argument('--dataset',type=str, default="librispeech",choices=['librispeech'], help="Which dataset to use") #TODO: Add support for more datasets.
     parser.add_argument("--root_dir",type=str,default=None,help="Path of Root Directory")
 
     # PENALTY ARGS:
@@ -63,6 +66,7 @@ def get_args():
 
     #Saving Settings
     parser.add_argument('--show',action="store_true",default=False,help="Whether to save image")
+    parser.add_argument('--save_ppt',action="store_true",default=False,help="Whether to save powerpoint with examples")
 
     # Debugging and testing
     # parser.add_argument('--debug', action='store_true', help='Run in debug mode with minimal data')
@@ -148,7 +152,8 @@ def main(args):
     data_module = AudioDataModule(dataset_name=args.dataset,batch_size=args.batch_size,num_workers=args.num_workers)
 
     trainer = Trainer(max_epochs=args.epochs,devices=gpu_list)
-    trainer.fit(attacker,data_module)
+    if not args.no_train:
+        trainer.fit(attacker,data_module)
 
     file_name = f"noise_{int(ATTACK_LEN_SEC*100)}tsteps"
 
@@ -160,18 +165,40 @@ def main(args):
 
     torch.save(attacker.noise,f"{NOISE_SAVEPATH}/noise_{int(ATTACK_LEN_SEC*100)}tsteps.pth")
     attacker.dump(f"{NOISE_SAVEPATH}/noise_{int(ATTACK_LEN_SEC*100)}tsteps.np.npy")
+
+    EXAMPLE_SAVEPATH = ROOT_DIR / "examples"
+
+    audio_sample = wavfile.read("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")[1]
     if args.show:
         from src.utils import save_photo_overlay # Jack would hate me for this, but I like importing things as I need them
-        from scipy.io import wavfile
-        EXAMPLE_SAVEPATH = ROOT_DIR / "examples" / DIRECTORY_STRUCTURE
-        EXAMPLE_SAVEPATH.mkdir(exist_ok=True,parents=True)
+        IMAGE_SAVEPATH = EXAMPLE_SAVEPATH / "images"/ DIRECTORY_STRUCTURE
+        IMAGE_SAVEPATH.mkdir(exist_ok=True,parents=True)
         noise = attacker.noise.detach().cpu().numpy().squeeze()
         sample_audio = wavfile.read(ROOT_DIR/"original_audio.wav")[1]
-        # print("AUDIO SHAPE",sample_audio.shape)
-        # print("NOISE SHAPE",noise.shape)
-        print(f"Saving image to {EXAMPLE_SAVEPATH/'plot.png'}")
-        save_photo_overlay(noise,sample_audio,EXAMPLE_SAVEPATH/"plot.png")
 
+
+        #sAVING AUDIO
+        audio_list = [sound for sound in (EXAMPLE_SAVEPATH / "sample_sounds").glob("*.wav")] # List of paths
+        AUDIO_DIR = EXAMPLE_SAVEPATH / "audio" / DIRECTORY_STRUCTURE
+        AUDIO_DIR.mkdir(exist_ok=True,parents=True)
+        images_list,audio_list = audio_to_img(attacker.noise,audio_list,audio_sample,AUDIO_DIR)
+
+        print(f"Saving image to {IMAGE_SAVEPATH/'plot.png'}")
+        save_photo_overlay(noise,sample_audio,IMAGE_SAVEPATH/"plot.png")
+    if args.save_ppt:
+        raise NotImplementedError
+        TEMP_DIR = EXAMPLE_SAVEPATH / "temp"
+        TEMP_DIR.mkdir(exist_ok=True,parents=True)
+
+
+        print(audio_list)
+        print("NUTS",images_list,audio_list)
+        # generate_example_ppt(images_list,audio_list,PPT_DIR / "examples.pptx")
+
+        
+
+
+        return
 
 
 if __name__ == "__main__":
