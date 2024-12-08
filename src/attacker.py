@@ -217,6 +217,18 @@ class RawAudioAttackerLightning(LightningModule):
             for param in self.discriminator.parameters():
                 param.requires_grad = False
 
+        #Frequency Decay
+        if self.freq_decay == "linear":
+            self.pattern = torch.linspace(0,1,steps=80).to(self.device) * self.decay_strength
+
+        elif self.freq_decay == 'polynomial':
+            self.pattern = torch.pow(torch.linspace(0,1,steps=80).to(self.device),2) * self.decay_strength
+
+        elif self.freq_decay == "logarithmic":
+            self.pattern = torch.logspace(0, 2, steps=80).to(self.device) * self.decay_strength
+  
+
+
 
 
     def frequency_decay(self,
@@ -228,19 +240,20 @@ class RawAudioAttackerLightning(LightningModule):
         TODO: Bring pattern initialization outside of this function. Currently it is re-initialized every time 
         
         """
-        if transformation == "linear":
-            pattern = torch.linspace(0,1,steps=80).to(self.device) * self.decay_strength
+        # if transformation == "linear":
+        #     pattern = torch.linspace(0,1,steps=80).to(self.device) * self.decay_strength
 
-        elif transformation == 'polynomial':
-            pattern = torch.pow(torch.linspace(0,1,steps=80).to(self.device),2) * self.decay_strength
+        # elif transformation == 'polynomial':
+        #     pattern = torch.pow(torch.linspace(0,1,steps=80).to(self.device),2) * self.decay_strength
 
-        elif transformation == "exponential" or transformation == 'polynomial':
-            raise NotImplementedError
-
-        else: #Return unchanged if no transformation
+        # elif transformation == "logarithmic":
+        #     pattern = torch.logspace(0, 2, steps=80).to(self.device) * self.decay_strength
+        # else: #Return unchanged if no transformation
+        #     return mel
+        if transformation is None:
             return mel
         #Finish pattern
-        pattern = pattern.resize(1,80,1)
+        pattern = self.pattern.resize(1,80,1).to(self.device)
         pattern = pattern.expand_as(mel)
         return mel + pattern
 
