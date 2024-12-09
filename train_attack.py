@@ -29,6 +29,7 @@ def get_args():
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
     parser.add_argument('--dataset',type = str,choices=['dev-clean','train-clean-100','train-other-500'])
     parser.add_argument("--no_train",action="store_true",default=False,help="Whether to train noise. Used for testing pathing & saving")
+    parser.add_argument("--whisper_model",choices=['tiny.en','base.en','small.en','medium.en'], default='tiny.en', help='Which Whisper model to use')
     # Attack Settings
     parser.add_argument('--domain',type=str,default="raw_audio",choices=['raw_audio',"mel"],help="Whether to attack in mel or audio space")
     parser.add_argument('--attack_length',type=float,default=1.,help = "Length of attack in seconds")
@@ -49,9 +50,13 @@ def get_args():
     parser.add_argument("--use_discriminator", action="store_true",default=False,help="Whether to use discriminator")
     parser.add_argument("--use_pretrained_discriminator",type=bool,default=True,help="Whether to use pretrained discriminator. Will find pre-trained automatically") #TODO: Set up pathing for pretrained discriminators
     # parser.add_argument("--lambda",type=float,default=1.,help="Lambda value. Represents strength of discriminator during training") 
+
     #Arguments for frequency decay
     parser.add_argument("--frequency_decay", type = str, choices = ['linear','polynomial','logarithmic','exponential'], default=None, help="Whether to use frequency decay, and what pattern of frequency decay") #TODO: Replace default with whatever works best for final code submission
     parser.add_argument("--decay_strength",type = float, default = 1., help = "Weight of the frequency decay")
+
+    parser.add_argument("--frequency_penalty", action="store_true", default=False, help="Toggle for MSE frequency penalty")
+    #NOTE: For controlling strength, use gamma
     # Optimizer and scheduler settings #TODO: Implement these arguments
     #----------------------------------------------------------------------------------------------------------------#
 
@@ -97,7 +102,7 @@ def main(args):
 
     ATTACK_LEN_SEC = args.attack_length
     DISCRIM_PATH = ROOT_DIR / "discriminator"
-
+    DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE / args.whisper_model
     DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE / args.domain
     # NOISE_SAVEPATH.mkdir(exist_ok=True) if not NOISE_SAVEPATH.exists() else None
     DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE/"prepend" if args.prepend else DIRECTORY_STRUCTURE/"overlay"
@@ -112,8 +117,8 @@ def main(args):
     #OBJECTIVE FUNCTION ARGS
     #------------------------------------------------------------------------------------------#
 
-        assert sum([args.use_discriminator, args.no_speech]) <= 1, \
-            "Can use EITHER discriminator or chunkloss or no speech"    
+        assert sum([args.use_discriminator, (args.frequency_decay is None), args.frequency_penalty]) <= 1, \
+            "Too many frequency penalties used"    
     if args.use_discriminator:
         discriminator = MelDiscriminator()
         DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE / "discriminator"
@@ -124,6 +129,11 @@ def main(args):
         discrim_weights = torch.load(ROOT_DIR/"discriminator" / f"discriminator_{int(ATTACK_LEN_SEC*100)}tsteps.pth",weights_only=True)
 
         discriminator.load_state_dict(discrim_weights)
+    if args.frequency_penalty:
+        DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE / "frequency_penalty"
+
+
+    DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE / f"gamma_{args.gamma}"
 
     #MODULE SETUP
     #------------------------------------------------------------------------------------------#
@@ -139,13 +149,15 @@ def main(args):
                                             no_speech=args.no_speech)
     elif args.domain == "raw_audio":
         attacker = RawAudioAttackerLightning(sec=ATTACK_LEN_SEC,
+                                            model=args.whisper_model,
                                             prepend=args.prepend,
                                             batch_size=args.batch_size,
                                             discriminator=discriminator,
                                             epsilon=args.clip_val,
                                             gamma = args.gamma,
                                             no_speech=args.no_speech,
-                                            frequency_decay=(args.frequency_decay,args.decay_strength)
+                                            frequency_decay=(args.frequency_decay,args.decay_strength),
+                                            learning_rate=args.learning_rate,
                                             )
     
 
