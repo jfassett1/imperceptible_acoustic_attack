@@ -101,7 +101,7 @@ def main(args):
     DIRECTORY_STRUCTURE = Path("") # General directory structure which is re-used for saving different files like noise, image, etc
 
     ATTACK_LEN_SEC = args.attack_length
-    DISCRIM_PATH = ROOT_DIR / "discriminator"
+    DISCRIM_PATH = ROOT_DIR / "discriminator" 
     DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE / args.whisper_model
     DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE / args.domain
     # NOISE_SAVEPATH.mkdir(exist_ok=True) if not NOISE_SAVEPATH.exists() else None
@@ -131,6 +131,8 @@ def main(args):
         discriminator.load_state_dict(discrim_weights)
     if args.frequency_penalty:
         DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE / "frequency_penalty"
+    if args.no_speech:
+        DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE / "nospeech"
 
 
     DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE / f"gamma_{args.gamma}"
@@ -182,7 +184,7 @@ def main(args):
 
     audio_sample = wavfile.read("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")[1]
     if args.show:
-        from src.utils import save_photo_overlay # Jack would hate me for this, but I like importing things as I need them
+        from src.utils import save_photo_overlay 
         IMAGE_SAVEPATH = EXAMPLE_SAVEPATH / "images"/ DIRECTORY_STRUCTURE
         IMAGE_SAVEPATH.mkdir(exist_ok=True,parents=True)
         noise = attacker.noise.detach().cpu().numpy().squeeze()
