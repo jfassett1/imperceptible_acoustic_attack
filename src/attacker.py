@@ -348,7 +348,5 @@ if __name__ == "__main__":
     x = whisper.load_audio("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")
     x = torch.tensor(x).unsqueeze(0)
     x = torch.cat([x,x,x,x],dim=0)
-
-    # print(model.dump("/home/jaydenfassett/audioversarial/imperceptible/nutsack.np.npy"))
     # x = (x,1,1)
 
