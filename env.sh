@@ -15,3 +15,4 @@ conda install matplotlib -y
 pip install openai-whisper==20240930
 
 pip install python-pptx
+pip install jiwer
