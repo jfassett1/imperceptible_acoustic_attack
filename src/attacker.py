@@ -172,11 +172,13 @@ class RawAudioAttackerLightning(LightningModule):
                  epsilon: float = 0.02,
                  target_length: int = 48000,
                  batch_size: int = 64,
+                 learning_rate: float = 1e-3,
                  discriminator = Optional[nn.Module],
                  noise_type: str = "uniform", #Options are ['uniform','normal']
                  gamma: float = 1.,
                  no_speech: bool = False,
-                 frequency_decay: tuple = (None,None)
+                 frequency_decay: tuple = (None,None),
+                 frequency_penalty: bool = False,
                  
 ):
         super(RawAudioAttackerLightning, self).__init__()
@@ -190,6 +192,7 @@ class RawAudioAttackerLightning(LightningModule):
         self.noise_len = int(sec * 16000)
         self.model = whisper.load_model(model).to(self.device)
         self.batch_size = batch_size
+        self.learning_rate = learning_rate
 
         # Imperceptibility parameters
         self.epsilon = epsilon
@@ -197,6 +200,7 @@ class RawAudioAttackerLightning(LightningModule):
         self.freq_decay, self.decay_strength = frequency_decay
         self.no_speech = no_speech
         self.discriminator = discriminator
+        self.frequency_penalty = frequency_penalty
 
         #Fix sparse tensors for Pytorch Lightning
         alignment_heads_dense = self.model.get_buffer("alignment_heads").to_dense()
@@ -236,20 +240,9 @@ class RawAudioAttackerLightning(LightningModule):
                           transformation: Literal['linear','polynomial','exponential'] = 'linear'): #TODO: Add support for more than just linspace
         """
         Adds values to gradients to penalize higher frequencies
-        Mel Spectrograms are (1, 80, T)
-        TODO: Bring pattern initialization outside of this function. Currently it is re-initialized every time 
-        
+        Mel Spectrograms are (1, 80, T)        
         """
-        # if transformation == "linear":
-        #     pattern = torch.linspace(0,1,steps=80).to(self.device) * self.decay_strength
 
-        # elif transformation == 'polynomial':
-        #     pattern = torch.pow(torch.linspace(0,1,steps=80).to(self.device),2) * self.decay_strength
-
-        # elif transformation == "logarithmic":
-        #     pattern = torch.logspace(0, 2, steps=80).to(self.device) * self.decay_strength
-        # else: #Return unchanged if no transformation
-        #     return mel
         if transformation is None:
             return mel
         #Finish pattern
@@ -267,14 +260,15 @@ class RawAudioAttackerLightning(LightningModule):
         self.decoder.update_device(device)
         return self
 
-    def forward(self, x):
+    def forward(self, x, noise):
         x = x.to(self.device)
         BATCH_SIZE = x.shape[0]
         # Optionally prepend the noise
+
         if self.prepend:
             #Slice noise sized chunk from x & add noise
             x = x[:,:,:-self.noise_len]
-            noise = self.noise.repeat(BATCH_SIZE,1,1)
+            noise = noise.repeat(BATCH_SIZE,1,1)
             x = torch.cat([noise, x], dim=-1)
 
 
@@ -300,26 +294,42 @@ class RawAudioAttackerLightning(LightningModule):
                 # self.noise.clamp_(max=self.epsilon)
 
 
+    def _mel_difference(self,mel1,mel2):
+        mel1 = mel1.mean(dim=2)
+        mel2 = mel2.mean(dim=2)
+
+        difference = mel1 - mel2
+        difference = torch.abs(difference)
+        return difference.mean()
+
+    
     def training_step(self, batch, batch_idx):
         # Unpack the batch
         x, sampling_rate, transcript = batch
 
         x = pad_or_trim(x)
         x = log_mel_spectrogram(x)
+        noise_mel = log_mel_spectrogram(self.noise)
         # probs = self.forward(x) #Gets probabilities
+        eot_prob, no_speech_prob = self.forward(x,noise_mel)
 
+
+        loss = -torch.log(eot_prob + 1e-9).mean()
         if self.discriminator is not None:
-            loss = -torch.log(self.forward(x)[0] + 1e-9).mean() + self.gamma * self.discriminator(log_mel_spectrogram(self.noise))
+            loss += self.gamma * self.discriminator(log_mel_spectrogram(self.noise))
+
+        elif self.frequency_penalty:
+            loss += self.gamma * self._mel_difference(x,noise_mel)
+
         elif self.no_speech:
-            eot_prob, no_speech_prob = self.forward(x)
-            loss = -torch.log(eot_prob + 1e-9).mean() + self.gamma * -torch.log(no_speech_prob + 1e-9).mean()
-        else:
-            loss = -torch.log(self.forward( x)[0] + 1e-9).mean()
+            loss += self.gamma * -torch.log(no_speech_prob + 1e-9).mean() #TODO: Add custom no_speech gamma
+
+
         self.log("train_loss", loss, batch_size=self.batch_size,prog_bar=True, on_step=True, on_epoch=True)
         return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
         return optimizer
 
     def dump(self, path: Union[str, Path], mel: bool = False):
