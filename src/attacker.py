@@ -14,7 +14,6 @@ import numpy as np
 import librosa
 import whisper
 
-
 class MelBasedAttackerLightning(LightningModule): #NOTE: DEPRECATED
     """ DEPRECATED, TODO: Make MEL an option of a general attacker class
     LightningModule that prepends noise for adversarial attacks, based on
