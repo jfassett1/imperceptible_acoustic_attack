@@ -28,7 +28,6 @@ class AttackPath:
                  discrim_dir = DISCRIM_PATH):
         
         self.root_dir    = root_dir 
-        self.noise_dir   = noise_dir 
         self.example_dir = example_dir 
         self.data_dir    = data_dir 
         self.discrim_dir = discrim_dir
@@ -62,6 +61,11 @@ class AttackPath:
             self.add_dir("nospeech")
             num_constraints +=1
         
+        if args.clip_val > 0:
+            self.add_dir(f"clip_val_{args.clip_val}")
+        self.add_dir(f"length_{args.attack_length}")
+        self.add_dir(f"epoch_{args.epochs}")
+        
         if num_constraints > 0: #Conditional because gamma is meaningless when not using a constraint
             #TODO: Make different gammas
             self.add_dir(f"gamma_{args.gamma}")
@@ -75,10 +79,18 @@ class AttackPath:
 
 
         #Final attributes for use:
-            
-        self.noise_path = self.root_dir / self.DIRECTORY_STRUCTURE / ("noise.np.npy" if args.domain == "raw_audio" else "noise.pth")
-        self.img_path = self.example_dir / "images" / self.DIRECTORY_STRUCTURE / "plot.png"
-        self.audio_path = self.example_dir / "audio" / self.DIRECTORY_STRUCTURE / "audio_with_attack.wav"
+        
+        self.noise_dir = self.root_dir / "noise" / self.DIRECTORY_STRUCTURE
+        self.noise_dir.mkdir(parents=True,exist_ok=True)
+
+        self.img_dir = self.example_dir / "images" / self.DIRECTORY_STRUCTURE 
+        self.audio_dir = self.example_dir / "audio" / self.DIRECTORY_STRUCTURE
+        if args.show:
+            self.img_dir.mkdir(parents=True,exist_ok=True)
+            self.audio_dir.mkdir(parents=True,exist_ok=True)
+        self.noise_path = self.noise_dir / ("noise.np.npy" if args.domain == "raw_audio" else "noise.pth")
+        self.img_path = self.img_dir  / "plot.png"
+        self.audio_path = self.audio_dir / "audio_with_attack.wav"
         return
 
     def add_dir(self,
