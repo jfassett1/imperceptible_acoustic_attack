@@ -1,0 +1,159 @@
+"""
+Handles pathing for training, eval, and demos.
+Used to be in train_attack.py
+
+"""
+from pathlib import Path
+
+
+ROOT_DIR = Path(__file__).parent.parent
+
+NOISE_DIR = ROOT_DIR / "noise"
+EXAMPLE_DIR = ROOT_DIR / "example"
+DATA_DIR = ROOT_DIR / "data" 
+DISCRIM_PATH = ROOT_DIR / "discriminator" 
+
+
+class AttackPath:
+    """
+    Class that has all potential paths as attributes
+    
+    """
+    def __init__(self,
+                 args,
+                 root_dir=ROOT_DIR,
+                 noise_dir=NOISE_DIR,
+                 example_dir = EXAMPLE_DIR,
+                 data_dir = DATA_DIR,
+                 discrim_dir = DISCRIM_PATH):
+        
+        self.root_dir    = root_dir 
+        self.noise_dir   = noise_dir 
+        self.example_dir = example_dir 
+        self.data_dir    = data_dir 
+        self.discrim_dir = discrim_dir
+
+        self.DIR_LIST = [] # Provides structure for any given sample. Can be re-used to noise, images, etc. Use looks like ROOT_DIR / DIRECTORY_STRUCTURE / example.png
+
+        ATTACK_LEN_SEC = args.attack_length
+        # Basic Unchanging dir structure
+        #------------------------------------------------------------------------------------------#
+
+        self.add_dir(args.whisper_model)
+        self.add_dir(args.domain)
+        self.add_dir(("prepend" if args.prepend else "overlay"))
+
+        #Penalty Args
+        #------------------------------------------------------------------------------------------#
+
+        num_constraints = 0
+        if args.use_discriminator:
+            self.add_dir("discriminator")
+            num_constraints +=1
+        if args.frequency_decay:
+            self.add_dir("frequency_decay")
+            self.add_dir(str(args.frequency_decay))
+            self.add_dir(str(args.decay_strength))
+            num_constraints +=1
+        if args.frequency_penalty:
+            self.add_dir("frequency_penalty")
+            num_constraints +=1
+        if args.no_speech:
+            self.add_dir("nospeech")
+            num_constraints +=1
+        
+        if num_constraints > 0: #Conditional because gamma is meaningless when not using a constraint
+            #TODO: Make different gammas
+            self.add_dir(f"gamma_{args.gamma}")
+            if num_constraints > 1:
+                print("WARNING. Be careful using more than one constraint! Code may not work yet.")
+
+        # self.add_dir("frequency_penalty")
+        self.DIRECTORY_STRUCTURE = Path("")
+        for path in self.DIR_LIST:
+            self.DIRECTORY_STRUCTURE /= path
+
+
+        #Final attributes for use:
+            
+        self.noise_path = self.root_dir / self.DIRECTORY_STRUCTURE / ("noise.np.npy" if args.domain == "raw_audio" else "noise.pth")
+        self.img_path = self.example_dir / "images" / self.DIRECTORY_STRUCTURE / "plot.png"
+        self.audio_path = self.example_dir / "audio" / self.DIRECTORY_STRUCTURE / "audio_with_attack.wav"
+        return
+
+    def add_dir(self,
+                curr,
+                base=None):
+        if base is None:
+            base = self.DIR_LIST
+        base.append(curr)
+
+    #------------------------------------------------------------------------------------------#
+   
+
+if __name__ ==  "__main__":
+    import argparse
+    def get_args():
+        parser = argparse.ArgumentParser(description="Training Script Arguments")
+
+        # General training settings
+        parser.add_argument('--epochs', type=int, default=1, help='Number of training epochs')
+        parser.add_argument('--batch_size', type=int, default=128, help='Batch size for training')
+        parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate for optimizer')
+        parser.add_argument('--weight_decay', type=float, default=1e-5, help='Weight decay (L2 regularization)')
+        parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
+        parser.add_argument('--dataset',type = str,choices=['dev-clean','train-clean-100','train-other-500'])
+        parser.add_argument("--no_train",action="store_true",default=False,help="Whether to train noise. Used for testing pathing & saving")
+        parser.add_argument("--whisper_model",choices=['tiny.en','base.en','small.en','medium.en'], default='tiny.en', help='Which Whisper model to use')
+        # Attack Settings
+        parser.add_argument('--domain',type=str,default="raw_audio",choices=['raw_audio',"mel"],help="Whether to attack in mel or audio space")
+        parser.add_argument('--attack_length',type=float,default=1.,help = "Length of attack in seconds")
+        parser.add_argument('--prepend',action="store_true", default = False,help="Whether to prepend or not")
+        parser.add_argument('--noise_dir',type=str,default=None,help="Where to save noise outputs")
+        parser.add_argument('--clip_val',type=float,default = -1,help="Clamping Value")
+        parser.add_argument('--gamma',type=float,default = 1., help= "Gamma value for scaling penalty")
+        parser.add_argument("--no_speech",action="store_true",default=False,help="Whether to use Nospeech in loss function")
+
+        # Data processing
+        parser.add_argument('--num_workers', type=int, default=0, help='Number of data loading workers')
+        # parser.add_argument('--dataset',type=str, default="librispeech",choices=['librispeech'], help="Which dataset to use") #TODO: Add support for more datasets.
+        parser.add_argument("--root_dir",type=str,default=None,help="Path of Root Directory")
+
+        # PENALTY ARGS:
+        #----------------------------------------------------------------------------------------------------------------#
+        # Arguments for Discriminator TODO: Either make better or remove
+        parser.add_argument("--use_discriminator", action="store_true",default=False,help="Whether to use discriminator")
+        parser.add_argument("--use_pretrained_discriminator",type=bool,default=True,help="Whether to use pretrained discriminator. Will find pre-trained automatically") #TODO: Set up pathing for pretrained discriminators
+        # parser.add_argument("--lambda",type=float,default=1.,help="Lambda value. Represents strength of discriminator during training") 
+
+        #Arguments for frequency decay
+        parser.add_argument("--frequency_decay", type = str, choices = ['linear','polynomial','logarithmic','exponential'], default=None, help="Whether to use frequency decay, and what pattern of frequency decay") #TODO: Replace default with whatever works best for final code submission
+        parser.add_argument("--decay_strength",type = float, default = 1., help = "Weight of the frequency decay")
+
+        parser.add_argument("--frequency_penalty", action="store_true", default=False, help="Toggle for MSE frequency penalty")
+        #NOTE: For controlling strength, use gamma
+        # Optimizer and scheduler settings #TODO: Implement these arguments
+        #----------------------------------------------------------------------------------------------------------------#
+
+        parser.add_argument('--optimizer', type=str, default='adam', choices=['adam', 'sgd'], help='Optimizer type')
+        parser.add_argument('--scheduler', type=str, default=None, choices=['step', 'cosine'], help='Learning rate scheduler')
+        parser.add_argument('--scheduler_step_size', type=int, default=10, help='Step size for StepLR')
+        parser.add_argument('--scheduler_gamma', type=float, default=0.1, help='Gamma for StepLR')
+
+        # GPU settings
+        parser.add_argument('--device', type=str, default='cuda', choices=['cpu','cuda'], help='Device to use for training')
+        parser.add_argument('--gpus', type=str, default='0', help='Comma-separated list of GPU IDs to use for training')
+
+        #Saving Settings
+        parser.add_argument('--show',action="store_true",default=False,help="Whether to save image")
+        parser.add_argument('--save_ppt',action="store_true",default=False,help="Whether to save powerpoint with examples")
+
+        # Debugging and testing
+        # parser.add_argument('--debug', action='store_true', help='Run in debug mode with minimal data')
+        # parser.add_argument('--test_only', action='store_true', help='Run only in evaluation mode (no training)')
+
+        args = parser.parse_args()
+        return args
+    
+    qq = AttackPath(get_args())
+    print(qq.noise_path)
