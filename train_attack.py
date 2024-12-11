@@ -12,7 +12,7 @@ from src.data import AudioDataModule
 from src.attacker import MelBasedAttackerLightning, RawAudioAttackerLightning
 from src.discriminator import MelDiscriminator
 from src.visual_utils import audio_to_img
-
+from src.pathing import AttackPath
 
 
 
@@ -83,63 +83,13 @@ def get_args():
 
 def main(args):
 
-
-    #PATHING
-    #------------------------------------------------------------------------------------------#
-    if args.root_dir is None:
-        ROOT_DIR = Path(__file__).parent
-    else:
-        ROOT_DIR = args.root_dir
-    # DATA_DIR = ROOT_DIR / "data"
-    if args.noise_dir is None:
-        NOISE_DIR = ROOT_DIR / "noise"
-        NOISE_DIR.mkdir(exist_ok=True) if not NOISE_DIR.exists() else None
-
-    else:
-        NOISE_DIR = args.noise_dir
-
-    DIRECTORY_STRUCTURE = Path("") # General directory structure which is re-used for saving different files like noise, image, etc
-
-    ATTACK_LEN_SEC = args.attack_length
-    DISCRIM_PATH = ROOT_DIR / "discriminator" 
-    DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE / args.whisper_model
-    DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE / args.domain
-    # NOISE_SAVEPATH.mkdir(exist_ok=True) if not NOISE_SAVEPATH.exists() else None
-    DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE/"prepend" if args.prepend else DIRECTORY_STRUCTURE/"overlay"
-    # NOISE_SAVEPATH.mkdir(exist_ok=True)
-
-    if not DISCRIM_PATH.exists():
-        DISCRIM_PATH.mkdir()
-    if args.frequency_decay is not None:
-        DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE / str(args.frequency_decay)
-        DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE / str(args.decay_strength)
-
-    #OBJECTIVE FUNCTION ARGS
-    #------------------------------------------------------------------------------------------#
-
-        assert sum([args.use_discriminator, (args.frequency_decay is None), args.frequency_penalty]) <= 1, \
-            "Too many frequency penalties used"    
+    discriminator = None
     if args.use_discriminator:
-        discriminator = MelDiscriminator()
-        DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE / "discriminator"
-    else:
-        discriminator = None
-
-    if args.use_pretrained_discriminator and args.use_discriminator:
-        discrim_weights = torch.load(ROOT_DIR/"discriminator" / f"discriminator_{int(ATTACK_LEN_SEC*100)}tsteps.pth",weights_only=True)
-
-        discriminator.load_state_dict(discrim_weights)
-    if args.frequency_penalty:
-        DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE / "frequency_penalty"
-    if args.no_speech:
-        DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE / "nospeech"
-
-
-    DIRECTORY_STRUCTURE = DIRECTORY_STRUCTURE / f"gamma_{args.gamma}"
-
+        raise NotImplementedError
     #MODULE SETUP
     #------------------------------------------------------------------------------------------#
     gpu_list = [int(gpu) for gpu in args.gpus.split(',')]
+    ATTACK_LEN_SEC = args.attack_length
 
     if args.domain == "mel":
         attacker = MelBasedAttackerLightning(sec=ATTACK_LEN_SEC,
@@ -166,43 +116,38 @@ def main(args):
     data_module = AudioDataModule(dataset_name=args.dataset,batch_size=args.batch_size,num_workers=args.num_workers)
 
     trainer = Trainer(max_epochs=args.epochs,devices=gpu_list)
+
     if not args.no_train:
         trainer.fit(attacker,data_module)
 
-    file_name = f"noise_{int(ATTACK_LEN_SEC*100)}tsteps"
+    ROOT_DIR = (__file__).parent
+    PATHS = AttackPath(args,ROOT_DIR)
 
-    NOISE_SAVEPATH = NOISE_DIR / DIRECTORY_STRUCTURE
-    NOISE_SAVEPATH.mkdir(exist_ok=True,parents=True)
-
-    print(f"Saving to {NOISE_SAVEPATH}/{file_name}.pth")
-    print(f"Saving to {NOISE_SAVEPATH}/{file_name}.np.npy")
-
-    torch.save(attacker.noise,f"{NOISE_SAVEPATH}/noise_{int(ATTACK_LEN_SEC*100)}tsteps.pth")
-    attacker.dump(f"{NOISE_SAVEPATH}/noise_{int(ATTACK_LEN_SEC*100)}tsteps.np.npy")
-
-    EXAMPLE_SAVEPATH = ROOT_DIR / "examples"
+    print(f"Saving to {PATHS.noise_path}")
+    if args.domain == "raw_audio":
+        attacker.dump(PATHS.noise_path)
+    else:
+        torch.save(attacker.noise,PATHS.noise_path)
 
     audio_sample = wavfile.read("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")[1]
+
     if args.show:
         from src.utils import save_photo_overlay 
-        IMAGE_SAVEPATH = EXAMPLE_SAVEPATH / "images"/ DIRECTORY_STRUCTURE
-        IMAGE_SAVEPATH.mkdir(exist_ok=True,parents=True)
+
         noise = attacker.noise.detach().cpu().numpy().squeeze()
         sample_audio = wavfile.read(ROOT_DIR/"original_audio.wav")[1]
 
 
         #sAVING AUDIO
-        audio_list = [sound for sound in (EXAMPLE_SAVEPATH / "sample_sounds").glob("*.wav")] # List of paths
-        AUDIO_DIR = EXAMPLE_SAVEPATH / "audio" / DIRECTORY_STRUCTURE
-        AUDIO_DIR.mkdir(exist_ok=True,parents=True)
-        images_list,audio_list = audio_to_img(attacker.noise,audio_list,audio_sample,AUDIO_DIR)
+        audio_list = [sound for sound in (PATHS.example_dir / "sample_sounds").glob("*.wav")] # List of paths
+        images_list,audio_list = audio_to_img(attacker.noise,audio_list,audio_sample,PATHS.audio_dir)
 
-        print(f"Saving image to {IMAGE_SAVEPATH/'plot.png'}")
-        save_photo_overlay(noise,sample_audio,IMAGE_SAVEPATH/"plot.png")
+        print(f"Saving image to {PATHS.img_dir/'plot.png'}")
+        save_photo_overlay(noise,sample_audio,PATHS.img_dir/"plot.png")
     if args.save_ppt:
         raise NotImplementedError
-        TEMP_DIR = EXAMPLE_SAVEPATH / "temp"
-        TEMP_DIR.mkdir(exist_ok=True,parents=True)
+        # TEMP_DIR = EXAMPLE_SAVEPATH / "temp"
+        # TEMP_DIR.mkdir(exist_ok=True,parents=True)
 
 
         print(audio_list)
