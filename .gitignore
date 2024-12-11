@@ -3,3 +3,4 @@ lightning_logs/
 noise/
 examples/*
 !examples/sample_sounds/
+*.pyc
