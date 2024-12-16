@@ -14,8 +14,9 @@ import numpy as np
 import librosa
 import whisper
 
-class MelBasedAttackerLightning(LightningModule): #NOTE: DEPRECATED
-    """ DEPRECATED, TODO: Make MEL an option of a general attacker class
+class MelBasedAttackerLightning(LightningModule): 
+    """ #NOTE: DEPRECATED
+    TODO: Make MEL an option of a general attacker class
     LightningModule that prepends noise for adversarial attacks, based on
     https://arxiv.org/pdf/2405.06134
     """
@@ -244,10 +245,10 @@ class RawAudioAttackerLightning(LightningModule):
 
         if transformation is None:
             return mel
-        #Finish pattern
+        #Finish pattern 
         pattern = self.pattern.resize(1,80,1).to(self.device)
         pattern = pattern.expand_as(mel)
-        return mel + pattern
+        return mel * pattern
 
     def to(self, device):
         #Updated 'to' function. Updates device of submodules
