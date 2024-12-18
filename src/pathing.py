@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).parent.parent
 
 NOISE_DIR = ROOT_DIR / "noise"
-EXAMPLE_DIR = ROOT_DIR / "example"
+EXAMPLE_DIR = ROOT_DIR / "examples"
 DATA_DIR = ROOT_DIR / "data" 
 DISCRIM_PATH = ROOT_DIR / "discriminator" 
 
