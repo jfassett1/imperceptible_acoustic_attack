@@ -83,7 +83,7 @@ class MelBasedAttackerLightning(LightningModule):
         # Optionally prepend the noise
         if self.prepend:
             #Slice noise sized chunk from x & add noise
-            x = x[:,:,:-self.noise_len]
+            x = x[:,:-self.noise_len]
             noise = self.noise.repeat(BATCH_SIZE,1,1)
             x = torch.cat([noise, x], dim=-1)
 
@@ -267,12 +267,13 @@ class RawAudioAttackerLightning(LightningModule):
 
         if self.prepend:
             #Slice noise sized chunk from x & add noise
-            x = x[:,:,:-self.noise_len]
+            noise = log_mel_spectrogram(self.noise)
+            noise = self.frequency_decay(noise,self.freq_decay)
             noise = noise.repeat(BATCH_SIZE,1,1)
+            x = x[:, :, :-noise.shape[-1]]
+            # noise = noise.repeat(BATCH_SIZE,1,1)
             x = torch.cat([noise, x], dim=-1)
-
-
-
+            
         else: #Adding Noise to tensor
             # pad_size = x.size(2) - noise.size(2)
             noise = log_mel_spectrogram(self.noise)
@@ -343,10 +344,17 @@ class RawAudioAttackerLightning(LightningModule):
 
 if __name__ == "__main__":
     device = "cuda"
-    model = MelBasedAttackerLightning(prepend=False).to(device)
+    model = RawAudioAttackerLightning(prepend=True,discriminator=None).to(device)
 
     x = whisper.load_audio("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")
-    x = torch.tensor(x).unsqueeze(0)
-    x = torch.cat([x,x,x,x],dim=0)
+    x = x.reshape(1,-1)
+    print(x.shape)
+    print(model.noise.shape)
+    # qq = log_mel_spectrogram(x)
+    r = model.training_step((x,1,1),1)
+    print(r)
+    # model.forward(torch.tensor(x).to(device),torch.randn(1,100).to(device))
+    # x = torch.tensor(x).unsqueeze(0)
+    # x = torch.cat([x,x,x,x],dim=0)
     # x = (x,1,1)
 
