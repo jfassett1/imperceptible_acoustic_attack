@@ -12,8 +12,7 @@ from src.data import AudioDataModule
 from src.attacker import MelBasedAttackerLightning, RawAudioAttackerLightning
 from src.discriminator import MelDiscriminator
 from src.visual_utils import audio_to_img
-from src.pathing import AttackPath
-
+from src.pathing import AttackPath, ROOT_DIR
 
 
 
@@ -120,7 +119,6 @@ def main(args):
     if not args.no_train:
         trainer.fit(attacker,data_module)
 
-    ROOT_DIR = (__file__).parent
     PATHS = AttackPath(args,ROOT_DIR)
 
     print(f"Saving to {PATHS.noise_path}")
@@ -132,7 +130,9 @@ def main(args):
     audio_sample = wavfile.read("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")[1]
 
     if args.show:
-        from src.utils import save_photo_overlay 
+        from src.utils import save_photo_overlay, save_photo_prepend 
+
+
 
         noise = attacker.noise.detach().cpu().numpy().squeeze()
         sample_audio = wavfile.read(ROOT_DIR/"original_audio.wav")[1]
@@ -141,9 +141,13 @@ def main(args):
         #sAVING AUDIO
         audio_list = [sound for sound in (PATHS.example_dir / "sample_sounds").glob("*.wav")] # List of paths
         images_list,audio_list = audio_to_img(attacker.noise,audio_list,audio_sample,PATHS.audio_dir)
-
+        if args.prepend:
+            save_photo_prepend(noise,sample_audio,PATHS.img_dir/"plot.png")
+            # raise NotImplementedError # Need to write function for prepending & saving
+        else:
+            save_photo_overlay(noise,sample_audio,PATHS.img_dir/"plot.png")
         print(f"Saving image to {PATHS.img_dir/'plot.png'}")
-        save_photo_overlay(noise,sample_audio,PATHS.img_dir/"plot.png")
+
     if args.save_ppt:
         raise NotImplementedError
         # TEMP_DIR = EXAMPLE_SAVEPATH / "temp"
