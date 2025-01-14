@@ -5,7 +5,7 @@ import torch
 from tqdm import tqdm
 import numpy as np
 from src.utils import overlay_torch
-
+from pesq import pesq_batch
 def get_args():
     parser = argparse.ArgumentParser(description="Training Script Arguments")
 
@@ -17,6 +17,8 @@ def get_args():
     parser.add_argument('--num_workers', type=int,default = 0, help="Number of data loading workers")
     parser.add_argument('--no_attack', action="store_true", default=False, help = "Whether to use attack or not")
     parser.add_argument('--device', type=str, default='cuda', choices=['cpu','cuda'], help='Device to use for training')
+    parser.add_argument('--batch_size', type=int, default=1, help='Batch size for eval')
+
     args = parser.parse_args()
     return args
 
@@ -28,14 +30,16 @@ class RawEvaluator:
                  dataset='dev-clean',
                  device='cuda',
                  no_attack = False,
-                 prepend = False):
+                 prepend = False,
+                 batch_size = 1):
             self.dataloader = AudioDataModule(dataset_name=dataset,
-                                               batch_size=1,
+                                               batch_size=batch_size,
                                                num_workers=args.num_workers).train_dataloader()
             self.device = device
             self.model = whisper.load_model(model).to(self.device)
             self.noise = torch.from_numpy(np.load(noise)).to(self.device) # Load noise & convert to tensor
             self.no_attack = no_attack
+            self.batch_size = batch_size
             if self.noise.ndim > 1:
                 self.noise = self.noise.squeeze()
 
@@ -43,16 +47,18 @@ class RawEvaluator:
             self.prepend = prepend
 
     def _attack(self,
-                x):
+                x,
+                noise):
         """
         Applies attack
         """
         if self.no_attack:
             return x
         if self.prepend:
-            x = torch.cat([self.noise,x]).to(self.device)
+            noise = noise.repeat(self.batch_size,1)
+            x = torch.cat([noise,x],dim=-1).to(self.device)
         else:
-            x = overlay_torch(self.noise,x)
+            x = overlay_torch(noise,x)
         
 
         return x
@@ -70,15 +76,34 @@ class RawEvaluator:
         for batch in tqdm(self.dataloader):
             x, sampling_rate, transcript = batch
             x = x.to(self.device)
-            x = self._attack(x.squeeze())
+            x = self._attack(x.squeeze(),self.noise)
             
             output = self.model.transcribe(x)['text']
             # print(output)
             i+=1
             nsl += len(output)
         nsl /= i
-        print(nsl)
-        return nsl         
+        print("Average NSL:",nsl)
+        return nsl
+    def calc_pesq(self,fs=16000):
+        i = 0
+        avg_pesq = 0
+        noise = self.noise.unsqueeze(0)
+        for batch in tqdm(self.dataloader):
+
+            x, sampling_rate, transcript = batch
+            # x = x.squeeze()
+
+            deg = self._attack(x.to(self.device),noise)
+            deg = deg.cpu().numpy()
+            x = x.cpu().numpy()
+            # print(deg.shape,x.shape)
+            result = pesq_batch(16000,x,deg,mode="wb")
+            i+=1
+            avg_pesq += result
+        avg_pesq /= i
+        print("PESQ:", avg_pesq)
+        
 
 if __name__ == "__main__":
 
@@ -91,6 +116,7 @@ if __name__ == "__main__":
                       args.device,
                       args.no_attack,
                       args.prepend,
+                      args.batch_size
                       )
     # qq.model.transcribe(noise)
-    qq.calc_nsl()
+    qq.calc_pesq()
