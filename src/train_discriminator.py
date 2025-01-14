@@ -26,7 +26,7 @@ def train_mel(discriminator,
     
     half_batch = batch_size // 2
     dataloader = AudioDataModule(dataset,
-                              batch_size=half_batch,
+                              batch_size=batch_size,
                               num_workers=num_workers).train_dataloader()
     
 
