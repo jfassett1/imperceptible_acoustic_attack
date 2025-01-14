@@ -130,7 +130,7 @@ def main(args):
     audio_sample = wavfile.read("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")[1]
 
     if args.show:
-        from src.utils import save_photo_overlay, save_photo_prepend 
+        from src.visual_utils import save_photo_overlay, save_photo_prepend 
 
 
 
