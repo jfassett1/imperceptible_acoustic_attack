@@ -9,8 +9,9 @@ from typing import Union, Optional, Literal
 import time
 from scipy.io import wavfile
 from src.data import AudioDataModule
-from src.attacker import MelBasedAttackerLightning, RawAudioAttackerLightning
-from src.discriminator import MelDiscriminator
+from src.attacker.mel_attacker import MelBasedAttackerLightning
+from src.attacker.raw_attacker import RawAudioAttackerLightning
+# from src.discriminator import MelDiscriminator
 from src.visual_utils import audio_to_img
 from src.pathing import AttackPath, ROOT_DIR
 
