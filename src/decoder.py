@@ -51,7 +51,8 @@ class RawDecoder():
         # print("PROBS",eot_probs)
         return eot_probs,no_speech_probs
 
-
+    def transcribe(self,x): # Whisper transcribe
+        return self.model.transcribe(x)
 
     def autoregressive(self,mel,n=15):
         batch_size = mel.shape[0]
@@ -101,7 +102,8 @@ if __name__ == "__main__":
     sot_tokens = torch.tensor(tokenizer.sot_sequence_including_notimestamps).unsqueeze(dim=1).to(device)
     qq = RawDecoder(model=model,tokenizer=tokenizer,device=device)
 
-    ll = qq.get_eot_prob(mels)
+    print(qq.transcribe(x)['text'])
+    # ll = qq.get_eot_prob(mels)
     # print(ll)
 
     
