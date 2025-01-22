@@ -72,7 +72,7 @@ def get_args():
     #Saving Settings
     parser.add_argument('--show',action="store_true",default=False,help="Whether to save image")
     parser.add_argument('--save_ppt',action="store_true",default=False,help="Whether to save powerpoint with examples")
-    parser.add_argument('--log_path',action="store_true",default=False,help="Whether to save paths in CSV")
+    parser.add_argument('--log_path',action="store_true",default=True,help="Whether to save paths in CSV")
 
     # Debugging and testing
     # parser.add_argument('--debug', action='store_true', help='Run in debug mode with minimal data')
