@@ -13,7 +13,7 @@ def get_args():
     parser.add_argument("--whisper_model",choices=['tiny.en','base.en','small.en','medium.en'], default='tiny.en', help='Which Whisper model to use')
     parser.add_argument('--domain',type=str,default="raw_audio",choices=['raw_audio',"mel"],help="Whether to attack in mel or audio space")
     parser.add_argument('--prepend',action="store_true", default = False,help="Whether to prepend")
-    parser.add_argument('--noise_path',type=str,help="Path of noise .npy")
+    parser.add_argument('--noise_path',type=str,required = True, help="Path of noise .npy")
     parser.add_argument('--num_workers', type=int,default = 0, help="Number of data loading workers")
     parser.add_argument('--no_attack', action="store_true", default=False, help = "Whether to use attack or not")
     parser.add_argument('--device', type=str, default='cuda', choices=['cpu','cuda'], help='Device to use for training')
@@ -55,7 +55,9 @@ class RawEvaluator:
         if self.no_attack:
             return x
         if self.prepend:
-            noise = noise.repeat(self.batch_size,1)
+            # noise = noise.repeat(self.batch_size,1)
+            # print(x.shape,noise.shape)
+            # x = x.unsqueeze(dim=0)
             x = torch.cat([noise,x],dim=-1).to(self.device)
         else:
             x = overlay_torch(noise,x)
@@ -66,25 +68,29 @@ class RawEvaluator:
                    
                    
         
-    def calc_nsl(self):
+    def calc_asl(self):
         """
-        Calculates negative sequence length
-        
+        Calculates negative sequence length and logs the running average to the progress bar.
         """
         i = 0
-        nsl = 0
-        for batch in tqdm(self.dataloader):
-            x, sampling_rate, transcript = batch
-            x = x.to(self.device)
-            x = self._attack(x.squeeze(),self.noise)
-            
-            output = self.model.transcribe(x)['text']
-            # print(output)
-            i+=1
-            nsl += len(output)
-        nsl /= i
-        print("Average NSL:",nsl)
-        return nsl
+        asl = 0
+        with tqdm(self.dataloader, desc="Calculating ASL") as pbar:
+            for batch in pbar:
+                x, sampling_rate, transcript = batch
+                x = x.to(self.device)
+                x = self._attack(x.squeeze(), self.noise)
+                
+                output = self.model.transcribe(x)['text']
+                i += 1
+                asl += len(output)
+                running_avg = asl / i
+                
+                # Update progress bar with the running average
+                pbar.set_postfix(running_avg=running_avg)
+        
+        asl /= i
+        print("Average asl:", asl)
+        return asl
     def calc_pesq(self,fs=16000):
         i = 0
         avg_pesq = 0
@@ -119,4 +125,4 @@ if __name__ == "__main__":
                       args.batch_size
                       )
     # qq.model.transcribe(noise)
-    qq.calc_pesq()
+    qq.calc_asl()
