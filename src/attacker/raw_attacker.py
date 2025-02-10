@@ -75,9 +75,9 @@ class RawAudioAttackerLightning(LightningModule):
         for param in self.model.parameters():
             param.requires_grad = False
 
-        if self.discriminator is not None:
-            for param in self.discriminator.parameters():
-                param.requires_grad = False
+        # if self.discriminator is not None:
+        #     for param in self.discriminator.parameters():
+        #         param.requires_grad = False
 
         #Frequency Decay
         if self.freq_decay == "linear":
@@ -95,7 +95,7 @@ class RawAudioAttackerLightning(LightningModule):
 
     def frequency_decay(self,
                           mel,
-                          transformation: Literal['linear','polynomial','exponential'] = 'linear'): #TODO: Add support for more than just linspace
+                          transformation: Literal['linear','polynomial','exponential'] = None): #TODO: Add support for more than just linspace
         """
         Adds values to gradients to penalize higher frequencies
         Mel Spectrograms are (1, 80, T)        
@@ -125,7 +125,7 @@ class RawAudioAttackerLightning(LightningModule):
 
         if self.prepend:
             #Slice noise sized chunk from x & add noise
-            noise = log_mel_spectrogram(self.noise)
+            # noise = log_mel_spectrogram(self.noise)
             noise = self.frequency_decay(noise,self.freq_decay)
             noise = noise.repeat(BATCH_SIZE,1,1)
             x = x[:, :, :-noise.shape[-1]]
@@ -134,7 +134,7 @@ class RawAudioAttackerLightning(LightningModule):
             
         else: #Adding Noise to tensor
             # pad_size = x.size(2) - noise.size(2)
-            noise = log_mel_spectrogram(self.noise)
+            # noise = log_mel_spectrogram(self.noise)
             noise = self.frequency_decay(noise,self.freq_decay)
             noise = noise.repeat(BATCH_SIZE,1,1)
 
@@ -151,6 +151,7 @@ class RawAudioAttackerLightning(LightningModule):
             with torch.no_grad():
                 self.noise.clamp_(max=0.02)
                 # self.noise.clamp_(max=self.epsilon)
+    # def _discrim_train(self,discriminator,noise_mel):
 
 
     def _mel_difference(self,mel1,mel2):
@@ -162,8 +163,8 @@ class RawAudioAttackerLightning(LightningModule):
         return difference.mean()
 
     def on_train_epoch_start(self):
-        for i in tqdm(range(100000)):
-            pass
+        # for i in tqdm(range(100000)):
+        #     pass
         return
     
 
@@ -173,6 +174,7 @@ class RawAudioAttackerLightning(LightningModule):
         epoch_number = self.current_epoch + 1 # one-indexing epoch num for convenience
         x = pad_or_trim(x)
         x = log_mel_spectrogram(x)
+        # print("SHAPE",x.shape)
         noise_mel = log_mel_spectrogram(self.noise)
         # probs = self.forward(x) #Gets probabilities
         eot_prob, no_speech_prob = self.forward(x,noise_mel)
