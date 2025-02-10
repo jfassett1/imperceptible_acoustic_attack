@@ -154,7 +154,7 @@ def main(args):
         raise NotImplementedError
     if args.log_path:
         txt_file = ROOT_DIR / "paths.txt"
-        file_path = str(PATHS.noise_path)
+        file_path = str(PATHS.noise_path) + "\n"
         with open(txt_file, "a") as file:
             file.write(file_path)
 
