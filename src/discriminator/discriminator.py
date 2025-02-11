@@ -45,10 +45,11 @@ class MelDiscriminator(nn.Module):
         x = self.fc(x) 
         
         return self.sigmoid(x)
+        
 
 if __name__ == "__main__":
     qq = MelDiscriminator()
     l = qq(testvec)
     p = qq(testvec2)
     print(l.shape,p.shape)
-
+    
