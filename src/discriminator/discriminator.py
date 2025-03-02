@@ -11,42 +11,53 @@ import pytorch_lightning
 
 testvec = torch.randn(size=(10,80,100))
 testvec2 = torch.randn(size=(10,1,80,100))
+
 class MelDiscriminator(nn.Module):
+    """
+    Discriminator class for Log Mel Spectrograms
+    Input must be (Batch_size, Channel, 80, 100)
+    """
     def __init__(self):
-        """
-        Discriminator class for Log Mel Spectrograms
-        Input must be (Batch_size, Channel, 80, 100)
-
-        
-        """
         super(MelDiscriminator, self).__init__()
-        
-        self.layer1 = nn.Conv2d(1, 32, kernel_size=6, stride=1, padding=2)
-        self.layer2 = nn.Conv2d(32, 64, kernel_size=6, stride=2, padding=2)
-        self.layer3 = nn.Conv2d(64, 64, kernel_size=6, stride=2, padding=2)
-        
-        self.maxpool1 = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.maxpool2 = nn.MaxPool2d(kernel_size=2, stride=2)
-        
-        self.fc = nn.Linear(1536,1)
-        self.sigmoid = nn.Sigmoid()
+        self.features = nn.Sequential(
+            # Convolutional block 1
+            nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(32),
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(32, 32, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(32),
+            nn.LeakyReLU(0.2),
+            
+            # Convolutional block 2
+            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(0.2),
+
+            # Convolutional block 3
+            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(128, 128, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.2),
+        )
+        self.fc = nn.Sequential(
+            nn.Linear(128 * 10 * 10, 512),  # Adjust based on input size
+            nn.LeakyReLU(0.2),
+            nn.Linear(512, 1),
+            nn.Sigmoid()
+        )
+
     def forward(self, x):
-        
         if len(x.shape) < 4:
-            x = x.unsqueeze(dim=1)
-        x = self.layer1(x)
-        x = self.maxpool1(x)
-        
-        x = self.layer2(x)
-        x = self.maxpool2(x)
-        x = self.layer3(x)
-
-        x = torch.flatten(x, start_dim=1)
-        x = self.fc(x) 
-        
-        return self.sigmoid(x)
-        
-
+            x = x.unsqueeze(dim=1)  # Add channel dimension if missing
+        x = self.features(x)
+        x = torch.flatten(x, start_dim=1)  # Flatten for fully connected layer
+        x = self.fc(x)
+        return x
 if __name__ == "__main__":
     qq = MelDiscriminator()
     l = qq(testvec)
