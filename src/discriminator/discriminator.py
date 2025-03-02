@@ -63,4 +63,4 @@ if __name__ == "__main__":
     l = qq(testvec)
     p = qq(testvec2)
     print(l.shape,p.shape)
-
+    
