@@ -56,6 +56,12 @@ def get_args():
     parser.add_argument("--decay_strength",type = float, default = 1., help = "Weight of the frequency decay")
 
     parser.add_argument("--frequency_penalty", action="store_true", default=False, help="Toggle for MSE frequency penalty")
+
+    #Arguments for frequency masking
+    parser.add_argument("--frequency_masking", action="store_true", default=False, help="Toggle for frequency masking")
+    parser.add_argument("--window_size", type = int, default=2048, help="Window Size for FFT")
+
+
     #NOTE: For controlling strength, use gamma
     # Optimizer and scheduler settings #TODO: Implement these arguments
     #----------------------------------------------------------------------------------------------------------------#
@@ -111,6 +117,8 @@ def main(args):
                                             no_speech=args.no_speech,
                                             frequency_decay=(args.frequency_decay,args.decay_strength),
                                             learning_rate=args.learning_rate,
+                                            frequency_masking=args.frequency_masking,
+                                            window_size = args.window_size,
                                             )
     
 
@@ -166,9 +174,7 @@ def main(args):
         # print("NUTS",images_list,audio_list)
         # generate_example_ppt(images_list,audio_list,PPT_DIR / "examples.pptx")
 
-        
-
-
+    
         return
 
 
