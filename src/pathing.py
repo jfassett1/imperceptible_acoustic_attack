@@ -60,6 +60,8 @@ class AttackPath:
         if args.no_speech:
             self.add_dir("nospeech")
             num_constraints +=1
+        if args.frequency_masking:
+            self.add_dir("frequency_masking")
         
         if args.clip_val > 0:
             self.add_dir(f"clip_val_{args.clip_val}")
