@@ -179,7 +179,7 @@ class RawAudioAttackerLightning(LightningModule):
 
         x = pad_or_trim(x)
         if self.frequency_masking: # Saves a copy for PSD calculation if needed
-            x_pad = x
+            x_pad = x.cpu()
    
         x = log_mel_spectrogram(x)
         # print("SHAPE",x.shape)
@@ -215,10 +215,11 @@ class RawAudioAttackerLightning(LightningModule):
         self.log("train_loss", loss, batch_size=self.batch_size,prog_bar=True, on_step=True, on_epoch=True)
         return loss
     def _threshold_loss(self,noise,audio,fs=16000,window_size = 2048):
-        print("Audio min:", audio.min().item(), "Audio max:", audio.max().item())
-
-        theta_xs, psd_max, PSD_x  = generate_th_batch(audio,fs=fs,window_size=window_size)
-        audio = torch.from_numpy(audio)
+        # print("Audio min:", audio.min().item(), "Audio max:", audio.max().item())
+        theta_xs, psd_max, PSD_x  = generate_th_batch(audio,
+                                                      fs=fs[0], #Sampling rate returns tuple of all samples
+                                                      window_size=window_size)
+        # audio = torch.from_numpy(audio)
         # print("NaNs in audio?", torch.isnan(audio).any().item())
         # print("Infs in audio?", torch.isinf(audio).any().item())
          # theta_x is (n, 43, 1025)
@@ -229,7 +230,7 @@ class RawAudioAttackerLightning(LightningModule):
         diff = torch.relu(PSD_delta - theta_xs) # 
         sum_over_freq = diff.sum(dim=2).mean(dim=1)
         sum_over_freq = sum_over_freq / theta_xs.shape[2] # final dim of theta_xs is the same as floor(1 / N/2 )
-        return sum_over_freq
+        return sum_over_freq.mean()
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
         return optimizer
