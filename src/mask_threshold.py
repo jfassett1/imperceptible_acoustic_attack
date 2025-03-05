@@ -193,7 +193,7 @@ def generate_th(audio, fs, window_size=2048):
     # compute the global masking threshold theta_xs 
     theta_xs = []
     # compute the global masking threshold in each window
-    print(PSD.shape)
+    # print(PSD.shape)
     for i in range(PSD.shape[1]):
         theta_xs.append(compute_th(PSD[:,i], barks, ATH, freqs))
     theta_xs = np.array(theta_xs)
@@ -203,11 +203,12 @@ def generate_th_batch(audio, fs, window_size=2048,test=1):
     """
 	returns the masking threshold theta_xs and the max psd of the audio
     """
-    torch_psd = compute_PSD_matrix_batch(torch.from_numpy(audio) , window_size)  #Getting PSD matrix. It 
+    if not isinstance(audio,torch.Tensor):
+        audio = torch.from_numpy(audio)
+    torch_psd = compute_PSD_matrix_batch(audio , window_size)  #Getting PSD matrix. It 
     # print("torch_psd",torch_psd[0].shape)
     # PSD, psd_max = torch_psd
     PSD, psd_max = [x.numpy() if isinstance(x, torch.Tensor) else x for x in torch_psd]
-
     freqs = librosa.core.fft_frequencies(sr=fs, n_fft=window_size)
     barks = Bark(freqs)
 
