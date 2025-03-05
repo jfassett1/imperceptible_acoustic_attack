@@ -161,10 +161,13 @@ def main(args):
     if args.save_ppt:
         raise NotImplementedError
     if args.log_path:
+        import sys
+        import shlex
+        command = shlex.join(sys.argv)
         txt_file = ROOT_DIR / "paths.txt"
-        file_path = str(PATHS.noise_path) + "\n"
+        row = f"{command}   {str(PATHS.noise_path)} "
         with open(txt_file, "a") as file:
-            file.write(file_path)
+            file.write(row)
 
         # TEMP_DIR = EXAMPLE_SAVEPATH / "temp"
         # TEMP_DIR.mkdir(exist_ok=True,parents=True)
