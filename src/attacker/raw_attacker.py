@@ -156,7 +156,10 @@ class RawAudioAttackerLightning(LightningModule):
     def on_before_optimizer_step(self, optimizer):
         if self.epsilon != -1:
             with torch.no_grad():
-                self.noise.clamp_(max=0.02)
+                norm = self.noise.norm(p=2,dim=1,keepdim=True)
+                factor = torch.clamp(norm / self.epsilon, min=1.0)
+                self.noise /= factor
+                # self.noise.clamp_(max=0.02)
                 # self.noise.clamp_(max=self.epsilon)
 
     def _mel_difference(self,mel1,mel2):
