@@ -59,6 +59,7 @@ def get_args():
 
     #Arguments for frequency masking
     parser.add_argument("--frequency_masking", action="store_true", default=False, help="Toggle for frequency masking")
+    parser.add_argument("--masker_cores", type=int, default = 0, help= "Number of cores allocated to masking threshold.")
     parser.add_argument("--window_size", type = int, default=2048, help="Window Size for FFT")
 
 
@@ -119,6 +120,7 @@ def main(args):
                                             learning_rate=args.learning_rate,
                                             frequency_masking=args.frequency_masking,
                                             window_size = args.window_size,
+                                            masker_cores= args.masker_cores,
                                             )
     
 
@@ -165,7 +167,7 @@ def main(args):
         import shlex
         command = shlex.join(sys.argv)
         txt_file = ROOT_DIR / "paths.txt"
-        row = f"{command}   {str(PATHS.noise_path)} "
+        row = f"{command}   {str(PATHS.noise_path)} \n"
         with open(txt_file, "a") as file:
             file.write(row)
 
