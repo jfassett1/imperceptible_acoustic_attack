@@ -200,10 +200,11 @@ class RawAudioAttackerLightning(LightningModule):
             loss += self.gamma * -torch.log(no_speech_prob + 1e-9).mean() #TODO: Add custom no_speech 
         elif self.frequency_masking:
             # batch_th = self._freq_mask()
-            print("aud",x_pad.shape)
-            print(x_pad[:,:self.noise.shape[1]].shape)
+            # print("aud",x_pad.shape)
+            # print(x_pad[:,:self.noise.shape[1]].shape)
             l_theta = self._threshold_loss(self.noise,x_pad[:,:self.noise.shape[1]], fs=sampling_rate,window_size = self.window_size)
-            loss += self.gamma * l_theta
+            
+            loss += (self.gamma * l_theta).item()
 
         
             
@@ -218,11 +219,11 @@ class RawAudioAttackerLightning(LightningModule):
 
         theta_xs, psd_max, PSD_x  = generate_th_batch(audio,fs=fs,window_size=window_size)
         audio = torch.from_numpy(audio)
-        print("NaNs in audio?", torch.isnan(audio).any().item())
-        print("Infs in audio?", torch.isinf(audio).any().item())
+        # print("NaNs in audio?", torch.isnan(audio).any().item())
+        # print("Infs in audio?", torch.isinf(audio).any().item())
          # theta_x is (n, 43, 1025)
         theta_xs = torch.from_numpy(theta_xs).to(self.device)
-        print("theta min:", theta_xs.min().item(), "thetao max:", theta_xs.max().item())
+        # print("theta min:", theta_xs.min().item(), "theta max:", theta_xs.max().item())
         PSD_delta, PSD_max_delta = compute_PSD_matrix_batch(noise,self.window_size,transpose=True)
         # theta_xs = theta_xs[:, :attack_tsteps, :] # Match theta_xs with timesteps in 
         diff = torch.relu(PSD_delta - theta_xs) # 
