@@ -80,15 +80,13 @@ def two_slops(bark_psd, delta_TM, bark_maskee):
         Ts.append(T)
     return Ts
     
-def compute_th(PSD, barks, ATH, freqs):
+def compute_th(PSD, barks, ATH, freqs,test=False):
     """ returns the global masking threshold
     """
     # Identification of tonal maskers
     # find the index of maskers that are the local maxima
     length = len(PSD)
     masker_index = signal.argrelextrema(PSD, np.greater)[0]
-    
-    
     # delete the boundary of maskers for smoothing
     if 0 in masker_index:
         masker_index = np.delete(0)
@@ -107,38 +105,66 @@ def compute_th(PSD, barks, ATH, freqs):
     _PSD = 1
     _INDEX = 2
     bark_psd = np.zeros([num_local_max, 3])
-    bark_psd[:, _BARK] = barks[masker_index]
-    bark_psd[:, _PSD] = P_TM
-    bark_psd[:, _INDEX] = masker_index
+    bark_psd[:, _BARK] = barks[masker_index] # Barks which are above the quiet threshold
+    bark_psd[:, _PSD] = P_TM # Powers of each masker
+    bark_psd[:, _INDEX] = masker_index #Each masker frequency index
     
 
     # delete the masker that doesn't have the highest PSD within 0.5 Bark around its frequency
     # for s in 
     # print(bark_psd.shape)
-    """
-    for i in range(num_local_max):
-        next = i + 1
-        if next >= bark_psd.shape[0]:
-            break
-        
-        while bark_psd[next, _BARK] - bark_psd[i, _BARK]  < 0.5:
-            # masker must be higher than quiet threshold
-            if quiet(freqs[int(bark_psd[i, _INDEX])]) > bark_psd[i, _PSD]:
-                bark_psd = np.delete(bark_psd, (i), axis=0)
-            if next == bark_psd.shape[0]:
+    if test == 0:
+        for i in range(num_local_max):
+            next = i + 1
+            if next >= bark_psd.shape[0]:
                 break
-                
-            if bark_psd[i, _PSD] < bark_psd[next, _PSD]:
-                bark_psd = np.delete(bark_psd, (i), axis=0)
-            else:
-                bark_psd = np.delete(bark_psd, (next), axis=0)
-            if next == bark_psd.shape[0]:
-                break   
-    """
+            
+            while bark_psd[next, _BARK] - bark_psd[i, _BARK]  < 0.5:
+                # masker must be higher than quiet threshold
+                if quiet(freqs[int(bark_psd[i, _INDEX])]) > bark_psd[i, _PSD]: #If masker's PSD is not greater than quiet threshold, remove
+                    bark_psd = np.delete(bark_psd, (i), axis=0)
+                if next == bark_psd.shape[0]:
+                    break
+                if bark_psd[i, _PSD] < bark_psd[next, _PSD]:
+                    bark_psd = np.delete(bark_psd, (i), axis=0)
+                else:
+                    bark_psd = np.delete(bark_psd, (next), axis=0)
+                if next == bark_psd.shape[0]:
+                    break
+    elif test == 1:
+        i = 0
+        while i < num_local_max - 1:
+            # Skip if current candidate has been invalidated
+            if bark_psd[i, _PSD] == -np.inf:
+                i += 1
+                continue
+
+            next_i = i + 1
+            while next_i < num_local_max and (bark_psd[next_i, _BARK] - bark_psd[i, _BARK] < 0.5):
+                # Skip invalid candidates in the next pointer
+                if bark_psd[next_i, _PSD] == -np.inf:
+                    next_i += 1
+                    continue
+
+                # If candidate i doesn't exceed quiet threshold, mark it as invalid
+                if quiet(bark_psd[i, _INDEX]) > bark_psd[i, _PSD]:
+                    bark_psd[i, _PSD] = -np.inf
+                    break  # Stop comparing; candidate i is no longer valid.
+
+                # Compare PSD values: mark the one with lower PSD as invalid
+                if bark_psd[i, _PSD] < bark_psd[next_i, _PSD]:
+                    bark_psd[i, _PSD] = -np.inf
+                else:
+                    bark_psd[next_i, _PSD] = -np.inf
+
+                next_i += 1
+
+            i += 1
+        bark_psd = bark_psd[bark_psd[:, _PSD] != -np.inf]
+
 
     # bmax = np.vectorize(bark_max)
 
-    bark_psd = bark_max_vectorized(barks,masker_index,P_TM,freqs)
     # compute the individual masking threshold
     delta_TM = 1 * (-6.025  -0.275 * bark_psd[:, 0])
     Ts = two_slops(bark_psd, delta_TM, barks) 
@@ -148,98 +174,7 @@ def compute_th(PSD, barks, ATH, freqs):
     theta_x = np.sum(pow(10, Ts/10.), axis=0) + pow(10, ATH/10.) 
     # print(theta_x.max())
     return theta_x
-# def bark_max(barks,masker_index,P_TM,freqs,num_local_max):
-#     for i in range(num_local_max):
-#         next = i + 1
-#         if next >= bark_psd.shape[0]:
-#             break
-        
-#         while bark_psd[next, _BARK] - bark_psd[i, _BARK]  < 0.5:
-#             # masker must be higher than quiet threshold
-#             if quiet(freqs[int(bark_psd[i, _INDEX])]) > bark_psd[i, _PSD]:
-#                 bark_psd = np.delete(bark_psd, (i), axis=0)
-#             if next == bark_psd.shape[0]:
-#                 break
-                
-#             if bark_psd[i, _PSD] < bark_psd[next, _PSD]:
-#                 bark_psd = np.delete(bark_psd, (i), axis=0)
-#             else:
-#                 bark_psd = np.delete(bark_psd, (next), axis=0)
-#             if next == bark_psd.shape[0]:
-#                 break   
-#     return bark_psd
-def bark_max_vectorized(barks, masker_index, P_TM, freqs):
-    """
-    A more 'vectorized' approach to select peaks (maskers) 
-    that are >= quiet threshold and are local maxima 
-    within a 0.5-Bark neighborhood.
-    
-    Parameters
-    ----------
-    barks : 1D array of Bark values for *all* frequencies.
-    masker_index : 1D array (int) of indices in barks/freqs 
-                   that correspond to local maxima.
-    P_TM : 1D array of PSD (or power) values at those maskers.
-    freqs : 1D array of frequencies (same indexing as barks).
-    
-    Returns
-    -------
-    bark_psd_kept : 2D array of shape (M,3), where:
-        - column 0 = bark (of the chosen maskers)
-        - column 1 = PSD (power) of the chosen maskers
-        - column 2 = original index into the `freqs` array
-    """
-    # 1) Build an array of [bark, PSD, index].
-    bark_psd = np.column_stack((
-        barks[masker_index],  # Bark values for each local max
-        P_TM,                 # PSD at those maxima
-        masker_index          # Original indices into barks/freqs
-    ))
 
-    # 2) Discard any that fail the quiet threshold test:
-    #    quiet_threshold at the frequency of each local max
-    q = quiet(freqs[masker_index])       # shape matches P_TM
-    mask = (P_TM >= q)                   # keep only where PSD >= quiet
-    bark_psd = bark_psd[mask]
-
-    # If everything got removed, just return empty.
-    if bark_psd.size == 0:
-        return bark_psd
-
-    # 3) Sort by Bark (column 0).
-    #    That way we can find consecutive maskers that are < 0.5 Bark apart.
-    sort_idx = np.argsort(bark_psd[:, 0])
-    bark_psd = bark_psd[sort_idx]
-
-    # 4) Identify clusters of maskers where consecutive Bark-distance < 0.5
-    #    We do this by taking differences in sorted Bark values:
-    sorted_barks = bark_psd[:, 0]
-    diffs = np.diff(sorted_barks)              # shape (N-1, )
-    cluster_breaks = (diffs >= 0.5).astype(int)
-    # cluster_breaks[i] = 1 means there's a "break" between item i and i+1.
-
-    # We can then build an integer "cluster_id" via cumulative sums:
-    # e.g., cluster_id = [0,0,0,1,1,2,2,2, ...] etc.
-    cluster_id = np.cumsum(np.insert(cluster_breaks, 0, 0))
-
-    # 5) For each cluster, keep only the masker with the highest PSD.
-    #    We can do this in a simple Python loop.  There are ways to do it 
-    #    more purely with NumPy, but a small loop is usually quite fast.
-    bark_psd_kept = []
-    for c in np.unique(cluster_id):
-        # Indices belonging to cluster c:
-        cluster_mask = (cluster_id == c)
-        # The row with the maximum PSD in that cluster:
-        cluster_rows = np.where(cluster_mask)[0]
-        i_best = cluster_rows[np.argmax(bark_psd[cluster_rows, 1])]  # col=1 is PSD
-        bark_psd_kept.append(bark_psd[i_best])
-
-    # Convert list-of-rows back to NumPy array, shape (M,3)
-    bark_psd_kept = np.array(bark_psd_kept, dtype=float)
-
-    # 6) Return final array of shape (M,3).
-    #    col 0 = Bark, col 1 = PSD, col 2 = original index into barks/freqs
-    return bark_psd_kept
     
 def generate_th(audio, fs, window_size=2048):
     """
@@ -258,12 +193,13 @@ def generate_th(audio, fs, window_size=2048):
     # compute the global masking threshold theta_xs 
     theta_xs = []
     # compute the global masking threshold in each window
+    print(PSD.shape)
     for i in range(PSD.shape[1]):
         theta_xs.append(compute_th(PSD[:,i], barks, ATH, freqs))
     theta_xs = np.array(theta_xs)
     return theta_xs, psd_max, PSD
 
-def generate_th_batch(audio, fs, window_size=2048):
+def generate_th_batch(audio, fs, window_size=2048,test=1):
     """
 	returns the masking threshold theta_xs and the max psd of the audio
     """
@@ -288,7 +224,17 @@ def generate_th_batch(audio, fs, window_size=2048):
     for samp in range(PSD.shape[0]):
         theta_i = []
         for i in range(PSD.shape[2]):
-            theta_i.append(compute_th(PSD[samp,:,i], barks, ATH, freqs))
+            # tst = compute_th(PSD[samp,:,i], barks, ATH, freqs,test=0)
+            # tst2 = compute_th(PSD[samp,:,i], barks, ATH, freqs,test=1)
+            # tst3 = compute_th(PSD[samp,:,i], barks, ATH, freqs,test=3)
+            # print(tst.shape,tst2.shape,)
+            # print("Maxes ",tst.max(),tst2.max())
+            # print("Mins ",tst.min(),tst2.min())
+            # print(tst,tst2)
+            # print(np.allclose(tst,tst2,atol=1e-6))
+            # exit()
+            theta_i.append(compute_th(PSD[samp,:,i], barks, ATH, freqs,test=test))
+
         theta_xs.append(theta_i)
     theta_xs = np.array(theta_xs)
     return theta_xs, psd_max, PSD
@@ -298,20 +244,26 @@ if __name__ == "__main__":
     import whisper
     x = whisper.load_audio("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")
     np.random.seed(0)
-    qq = np.random.randn(16000)
+    qq = np.random.randn(2,16000)
     # print(compute_PSD_matrix(qq,2048)[0])
     #Checking equality between batched function, and normal function
 
     print("Testing PSD matrix:")
+    q1 = generate_th_batch(qq,16000,test=0)
+    q2 = generate_th_batch(qq,16000,test=1)
 
-    from time import perf_counter
+
+    # print(q1[0].shape, "\n", q2[0].shape)
+    # from time import perf_counter
 
     # psd1 = compute_PSD_matrix(qq[0,:],2048)[0]
     # psd2 = compute_PSD_matrix_batch(torch.tensor(qq),2048)[0]
 
-    q1 = generate_th_batch(qq,16000)[0]
-
-    print(q1.max(),q1.min())
+    # q1 = generate_th_batch(qq,16000)[0]
+    # q2 = generate_th_batch(qq,16000)[0]
+    # print(np.abs(q1 - q2).mean())
+    # print(np.allclose(q1,q2,atol=1e-6))
+    # print(q1.max(),q1.min())
     # psd1 = torch.tensor(psd1)
     # psddiff = torch.abs(psd1 - psd2).sum().sum()
     # print(psd1.shape)
