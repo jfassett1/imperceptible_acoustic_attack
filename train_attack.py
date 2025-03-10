@@ -8,12 +8,13 @@ from pathlib import Path
 from typing import Union, Optional, Literal
 import time
 from scipy.io import wavfile
-from src.data import AudioDataModule
+from src.data import AudioDataModule, data_dir
 from src.attacker.mel_attacker import MelBasedAttackerLightning
 from src.attacker.raw_attacker import RawAudioAttackerLightning
 # from src.discriminator import MelDiscriminator
 from src.visual_utils import audio_to_img
 from src.pathing import AttackPath, ROOT_DIR
+from src.masking.preprocess_threshold import preprocess_dataset
 
 
 
@@ -24,7 +25,7 @@ def get_args():
     # General training settings
     parser.add_argument('--epochs', type=int, default=1, help='Number of training epochs')
     parser.add_argument('--batch_size', type=int, default=128, help='Batch size for training')
-    parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate for optimizer')
+    parser.add_argument('--learning_rate', type=float, default=0.005, help='Learning rate for optimizer')
     parser.add_argument('--weight_decay', type=float, default=1e-5, help='Weight decay (L2 regularization)')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
     parser.add_argument('--dataset',type = str,choices=['dev-clean','train-clean-100','train-other-500'])
@@ -98,6 +99,18 @@ def main(args):
     #------------------------------------------------------------------------------------------#
     gpu_list = [int(gpu) for gpu in args.gpus.split(',')]
     ATTACK_LEN_SEC = args.attack_length
+    threshold = None
+    
+    if args.frequency_masking:
+        threshold_dir = (ROOT_DIR / "thresholds") # If no threshold path, create it
+        threshold_dir.mkdir(exist_ok=True,parents=True)
+
+        mask_path = threshold_dir / f"{args.dataset}.np.npy"
+        if not mask_path.exists():
+            print(f"Threshold for dataset \'{args.dataset}\' not found. Calculating now:")
+            threshold = preprocess_dataset(args.dataset,output=mask_path, batch_size=args.batch_size)
+        else:
+            threshold = np.load(mask_path)
 
     if args.domain == "mel":
         attacker = MelBasedAttackerLightning(sec=ATTACK_LEN_SEC,
@@ -121,12 +134,15 @@ def main(args):
                                             frequency_masking=args.frequency_masking,
                                             window_size = args.window_size,
                                             masker_cores= args.masker_cores,
+                                            mask_threshold = threshold,
                                             )
     
 
     data_module = AudioDataModule(dataset_name=args.dataset,batch_size=args.batch_size,num_workers=args.num_workers)
 
     trainer = Trainer(max_epochs=args.epochs,devices=gpu_list)
+
+
 
     if not args.no_train:
         trainer.fit(attacker,data_module)
