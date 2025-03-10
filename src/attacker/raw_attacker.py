@@ -14,7 +14,7 @@ from tqdm import tqdm
 import numpy as np
 import librosa
 import whisper
-from src.mask_threshold import generate_th_batch, compute_PSD_matrix_batch
+from src.masking.mask_threshold import generate_th_batch, compute_PSD_matrix_batch
 
 
 class RawAudioAttackerLightning(LightningModule):
@@ -29,7 +29,6 @@ class RawAudioAttackerLightning(LightningModule):
                  sec: Union[int, float] = 1,
                  prepend: bool = True,
                  epsilon: float = 0.02,
-                 target_length: int = 48000,
                  batch_size: int = 64,
                  learning_rate: float = 1e-3,
                  discriminator = Optional[nn.Module],
@@ -40,6 +39,8 @@ class RawAudioAttackerLightning(LightningModule):
                  frequency_penalty: bool = False,
                  frequency_masking:bool = False,
                  window_size:int = 2048,
+                 masker_cores:int = 16,
+                 mask_threshold : Union[np.array,np.ndarray] = None
                  
 ):
         super(RawAudioAttackerLightning, self).__init__()
@@ -49,7 +50,6 @@ class RawAudioAttackerLightning(LightningModule):
 
         #General hyperparameters for attack
         self.prepend = prepend
-        self.target_length = target_length
         self.noise_len = int(sec * 16000)
         self.model = whisper.load_model(model).to(self.device)
         self.batch_size = batch_size
@@ -65,6 +65,9 @@ class RawAudioAttackerLightning(LightningModule):
 
         self.frequency_masking = frequency_masking
         self.window_size = window_size
+        if mask_threshold is not None:
+            self.mask_threshold = torch.from_numpy(mask_threshold).unsqueeze(0).to(device)
+            # self.mask_threshold = self.mask_threshold[:,:self.noise_len,:]
 
         #Fix sparse tensors for Pytorch Lightning
         alignment_heads_dense = self.model.get_buffer("alignment_heads").to_dense()
@@ -156,11 +159,11 @@ class RawAudioAttackerLightning(LightningModule):
     def on_before_optimizer_step(self, optimizer):
         if self.epsilon != -1:
             with torch.no_grad():
-                norm = self.noise.norm(p=2,dim=1,keepdim=True)
-                factor = torch.clamp(norm / self.epsilon, min=1.0)
-                self.noise /= factor
+                # norm = self.noise.norm(p=torch.inf,dim=1,keepdim=True)
+                # factor = torch.clamp(norm / self.epsilon, min=1.0)
+                # self.noise /= factor
                 # self.noise.clamp_(max=0.02)
-                # self.noise.clamp_(max=self.epsilon)
+                self.noise.clamp_(min=-self.epsilon, max=self.epsilon)
 
     def _mel_difference(self,mel1,mel2):
         mel1 = mel1.mean(dim=2)
@@ -182,7 +185,7 @@ class RawAudioAttackerLightning(LightningModule):
 
         x = pad_or_trim(x)
         if self.frequency_masking: # Saves a copy for PSD calculation if needed
-            x_pad = x.cpu()
+            x_pad = x
    
         x = log_mel_spectrogram(x)
         # print("SHAPE",x.shape)
@@ -219,20 +222,26 @@ class RawAudioAttackerLightning(LightningModule):
         return loss
     def _threshold_loss(self,noise,audio,fs=16000,window_size = 2048):
         # print("Audio min:", audio.min().item(), "Audio max:", audio.max().item())
-        theta_xs, psd_max, PSD_x  = generate_th_batch(audio,
-                                                      fs=fs[0], #Sampling rate returns tuple of all samples
-                                                      window_size=window_size)
+        # theta_xs, psd_max, PSD_x  = generate_th_batch(audio,
+        #                                               fs=fs[0], #Sampling rate returns tuple of all samples
+        #                                               window_size=window_size)
         # audio = torch.from_numpy(audio)
-        # print("NaNs in audio?", torch.isnan(audio).any().item())
-        # print("Infs in audio?", torch.isinf(audio).any().item())
+
          # theta_x is (n, 43, 1025)
-        theta_xs = torch.from_numpy(theta_xs).to(self.device)
+        # theta_xs = torch.from_numpy(theta_xs).to(self.device)
         # print("theta min:", theta_xs.min().item(), "theta max:", theta_xs.max().item())
         PSD_delta, PSD_max_delta = compute_PSD_matrix_batch(noise,self.window_size,transpose=True)
+        
+        t_max = PSD_delta.shape[1]
+        theta_xs = self.mask_threshold[:,:t_max,:]
+        self.mask_threshold
+        # print(theta_xs.shape)
+        # print(PSD_delta.shape,theta_xs.shape)
         # theta_xs = theta_xs[:, :attack_tsteps, :] # Match theta_xs with timesteps in 
         diff = torch.relu(PSD_delta - theta_xs) # 
         sum_over_freq = diff.sum(dim=2).mean(dim=1)
         sum_over_freq = sum_over_freq / theta_xs.shape[2] # final dim of theta_xs is the same as floor(1 / N/2 )
+        print("q",sum_over_freq)
         return sum_over_freq.mean()
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
@@ -246,12 +255,15 @@ class RawAudioAttackerLightning(LightningModule):
 
 if __name__ == "__main__":
     device = "cuda"
-    model = RawAudioAttackerLightning(prepend=False,discriminator=None,frequency_masking=True).to(device)
+    mt = np.load("/home/jaydenfassett/audioversarial/imperceptible/thresholds/train-clean-100.np.npy")
+    model = RawAudioAttackerLightning(prepend=False,discriminator=None,frequency_masking=True,mask_threshold=mt).to(device)
+
 
     x = whisper.load_audio("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")
     x = x.reshape(1,-1)
-    print(x.shape)
-    print(model.noise.shape)
+
+    # print(x.shape)
+    # print(model.noise.shape)
     # qq = log_mel_spectrogram(x)
     r = model.training_step((x,16000,1),1)
     print(r)
