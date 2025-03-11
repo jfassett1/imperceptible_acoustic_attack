@@ -54,3 +54,11 @@ To run the attack, use the `train_attack.py` file, with the following args:
 - `--frequency_masking`: If set, enables frequency masking (default: `False`).
 - `--masker_cores`: Number of cores allocated for masking threshold (default: `0`).
 - `--window_size`: Window size for FFT (default: `2048`).
+
+
+# Organization
+
+## Path Logging
+
+Generated noise will be saved according to the arguments. Its path will be printed at the end of training.
+It will also be saved in paths.txt in the main directory (created when running the script).
