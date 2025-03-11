@@ -64,7 +64,7 @@ class AttackPath:
             self.add_dir("frequency_masking")
         
         if args.clip_val > 0:
-            self.add_dir(f"clip_val_{args.clip_val}")
+            self.add_dir(f"clip_val_{round(args.clip_val,5)}")
         self.add_dir(f"length_{args.attack_length}")
         self.add_dir(f"epoch_{args.epochs}")
         
