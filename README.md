@@ -56,8 +56,12 @@ To run the attack, use the `train_attack.py` file, with the following args:
 - `--window_size`: Window size for FFT (default: `2048`).
 
 
-# Organization
+# Example
 
+To train an overlayed attack, we can use a command as such:
+`python train_attack.py --dataset <dataset> --clip_val 0.02 --gpus 0,1 --epochs 40` 
+
+The path will be saved by default to `<ROOT_DIR>/noise/tiny.en/raw_audio/overlay/clip_val_0.02/length_1.0/epoch_1/noise.np.npy`
 ## Path Logging
 
 Generated noise will be saved according to the arguments. Its path will be printed at the end of training.
