@@ -6,16 +6,17 @@ from pathlib import Path
 from whisper import pad_or_trim
 from tqdm import tqdm
 import numpy as np
+from time import time
+import types
 root_dir = Path(__file__).parent.parent
 data_dir = Path("/media/drive1/jaydenfassett/audio_data")
 # data_dir = root_dir / "data"
 
 
-
 class AudioDataModule(pl.LightningDataModule):
-    def __init__(self, dataset_name="librispeech", batch_size=32, num_workers=0):
+    def __init__(self, dataset_name:str ="librispeech:dev-clean", batch_size=32, num_workers=0):
         super().__init__()
-        self.dataset_name = dataset_name
+        self.dataset_name, self.split = dataset_name.split(":")
         self.batch_size = batch_size
         self.num_workers = num_workers
 
@@ -25,13 +26,21 @@ class AudioDataModule(pl.LightningDataModule):
 
     def prepare_data(self):
         # Download the dataset if it is not already available TODO: Full conditionals
-        # if self.dataset_name == "librispeech":
-        self.dataset = torchaudio.datasets.LIBRISPEECH(data_dir,
-                            # 'dev-clean',
-                            # 'train-clean-100',
-                            self.dataset_name,
-                            # 'train-other-500',
-                                    download = True)
+        match self.dataset_name.lower():
+            case "librispeech":
+                self.dataset = torchaudio.datasets.LIBRISPEECH(data_dir, self.split, download=True)
+
+            case "tedlium": 
+                self.dataset = torchaudio.datasets.TEDLIUM(data_dir, subset=self.split, audio_ext=".flac",download=True)
+                self.dataset._load_audio = types.MethodType(_load_audio_patched, self.dataset) #Monkey Patching original load_data function, because it does not default to the correct backend.
+
+            case "commonvoice":
+                self.dataset = torchaudio.datasets.COMMONVOICE(data_dir, version="cv-corpus-13.0-2023-03-09", download=True)
+
+            case "vctk":
+                self.dataset = torchaudio.datasets.VCTK(data_dir, download=True)
+            case _:
+                raise ValueError(f"Dataset {self.dataset_name} is not supported.")
     
     def setup(self, stage=None):
         self.prepare_data()
@@ -49,6 +58,7 @@ class AudioDataModule(pl.LightningDataModule):
         
         
         """
+        start = time()
         dl = self.random_all_dataloader()
         pbar = tqdm(enumerate(dl),total=N-1)
 
@@ -60,6 +70,7 @@ class AudioDataModule(pl.LightningDataModule):
         print("Calculating Data Statistics...")
         for i, (waveform, sample_rate, transcript) in pbar:
             waveform = waveform[:, :size_test]
+            # print(waveform.shape)
             if waveform.size(0) < self.batch_size:  # Skip batch if's not the right size
                 continue  
 
@@ -75,18 +86,18 @@ class AudioDataModule(pl.LightningDataModule):
             pbar.set_description(f"Memory Usage: {size_gb:.3f} GB")
             valid += 1
             if valid == N:
-                print(valid)
                 break
         # Compute global IQR
         q1, q3 = np.percentile(waveform_values, [25, 75])
         iqr = q3 - q1
-        print("Complete")
-        return iqr
+        print(f"Completed in {(time() - start):.6f} seconds")
+        return iqr, q3, q1
 
-    def collate_fn(self, batch):
+    def collate_fn(self, batch): #Collate not the problem
         # Collate function to handle variable-length audio sequences
 
         audio, sampling_rate,transcript,utt,speak,chap= zip(*batch)
+        # print(audio[0].shape)
 
         #No need to trim 
         resized_audio = [pad_or_trim(aud) for aud in audio]
@@ -106,14 +117,46 @@ class AudioDataModule(pl.LightningDataModule):
                           num_workers=self.num_workers, shuffle=False, collate_fn=self.collate_fn)        
     def random_all_dataloader(self):
         return DataLoader(self.dataset, batch_size=self.batch_size, 
-                    num_workers=self.num_workers, shuffle=True, collate_fn=self.collate_fn)  
+                    num_workers=self.num_workers, shuffle=False, collate_fn=self.collate_fn)  
 
+
+def _load_audio_patched (self, path: str, start_time: float, end_time: float, sample_rate: int = 16000):
+
+    start_time = int(float(start_time) * sample_rate)
+    end_time = int(float(end_time) * sample_rate)
+
+    kwargs = {"frame_offset": start_time, "num_frames": end_time - start_time, "backend":"soundfile"}
+    return torchaudio.load(path, **kwargs)
 if __name__ == "__main__":
+    ""
+    # qr = AudioDataModule(dataset_name="tedlium:dev").all_dataloader()
+    # qq = AudioDataModule(dataset_name="librispeech:train-clean-100").all_dataloader()
+    # qr = torchaudio.datasets.TEDLIUM(data_dir, subset="dev", audio_ext=".flac",download=True)
+    # qq = torchaudio.datasets.LIBRISPEECH(data_dir, "dev-clean", download=True)
 
-    q = AudioDataModule(dataset_name="train-clean-100")
+    # qr._load_audio = types.MethodType(_load_audio_patched, qr)
+    # qq[5]
+    # print(f"Lib Read Time: {(time() - start):.6f} seconds")
+    # qr[5]
+    # print(f"Ted Read Time: {(time() - start):.6f} seconds")
+    # start = time()
+    # for i in tqdm(qq,total=len(qq)):
+    #     pass
+    # print(f"Lib Read Time: {(time() - start):.6f} seconds")
+    # start = time()
+    # for i in tqdm(qr,total=len(qr)):
+    #     pass
+    # print(f"Ted Read Time: {(time() - start):.6f} seconds")
 
-    p = q.get_IQR(N=100)
-    print(p)
+
+
+    # waveform, sample_rate, transcript, talk_id, speaker_id, identifier = qr[1000]
+    # print(qr._path)
+
+    # p = q.get_IQR(N=5)
+    # q = AudioDataModule(dataset_name="librispeech:train-clean-100")
+    # p = q.get_IQR(N=5)
+    # print(p)
     # dl = q.train_dataloader()
     
     # for i in range(1):
