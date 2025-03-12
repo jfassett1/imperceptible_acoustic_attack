@@ -10,9 +10,11 @@ conda activate imperceptible
 conda install pytorch torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c nvidia -y
 conda install pytorch-lightning -c conda-forge -y
 conda install matplotlib -y
-# conda install scipy -y
-# conda install librosa -y
+conda install scipy -y
+pip install librosa
 pip install openai-whisper==20240930
 
 pip install python-pptx
 pip install jiwer
+echo "Environment Creation complete! To activate, use the following command:"
+echo "conda activate imperceptible"
