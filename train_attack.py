@@ -28,7 +28,7 @@ def get_args():
     parser.add_argument('--learning_rate', type=float, default=0.005, help='Learning rate for optimizer')
     parser.add_argument('--weight_decay', type=float, default=1e-5, help='Weight decay (L2 regularization)')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
-    parser.add_argument('--dataset',type = str,choices=['dev-clean','train-clean-100','train-other-500'])
+    parser.add_argument('--dataset',type = str, default= "librispeech:dev-clean", help="Which dataset to use. Should look like `dataset:split` ex. librispeech:dev-clean")
     parser.add_argument("--no_train",action="store_true",default=False,help="Whether to train noise. Used for testing pathing & saving")
     parser.add_argument("--whisper_model",choices=['tiny.en','base.en','small.en','medium.en'], default='tiny.en', help='Which Whisper model to use')
     # Attack Settings
@@ -36,9 +36,12 @@ def get_args():
     parser.add_argument('--attack_length',type=float,default=1.,help = "Length of attack in seconds")
     parser.add_argument('--prepend',action="store_true", default = False,help="Whether to prepend or not")
     parser.add_argument('--noise_dir',type=str,default=None,help="Where to save noise outputs")
-    parser.add_argument('--clip_val',type=float,default = -1,help="Clamping Value")
     parser.add_argument('--gamma',type=float,default = 1., help= "Gamma value for scaling penalty")
     parser.add_argument("--no_speech",action="store_true",default=False,help="Whether to use Nospeech in loss function")
+
+    #Epsilon Constraints
+    parser.add_argument('--clip_val',type=float,default = 0.02,help="Clamping Value")
+    parser.add_argument('--adaptive_clip',action="store_true",default = False,help="Whether to adapt the clipping value to the dataset.")
 
     # Data processing
     parser.add_argument('--num_workers', type=int, default=0, help='Number of data loading workers')
@@ -91,6 +94,19 @@ def get_args():
 
 
 def main(args):
+    #ARG HANDLING
+    #------------------------------------------------------------------------------------------#
+    args.dataset = args.dataset.lower()
+    if args.frequency_masking:
+        threshold_dir = (ROOT_DIR / args.dataset.split(":")[0] / "thresholds") # If no threshold path, create it
+        threshold_dir.mkdir(exist_ok=True,parents=True)
+
+        mask_path = threshold_dir / f"{args.dataset}.np.npy"
+        if not mask_path.exists():
+            print(f"Threshold for dataset \'{args.dataset}\' not found. Calculating now:")
+            threshold = preprocess_dataset(args.dataset,output=mask_path, batch_size=args.batch_size)
+        else:
+            threshold = np.load(mask_path)
 
     discriminator = None
     if args.use_discriminator:
@@ -101,16 +117,15 @@ def main(args):
     ATTACK_LEN_SEC = args.attack_length
     threshold = None
     
-    if args.frequency_masking:
-        threshold_dir = (ROOT_DIR / "thresholds") # If no threshold path, create it
-        threshold_dir.mkdir(exist_ok=True,parents=True)
+    data_module = AudioDataModule(dataset_name=args.dataset,
+                                batch_size=args.batch_size,
+                                num_workers=args.num_workers)
 
-        mask_path = threshold_dir / f"{args.dataset}.np.npy"
-        if not mask_path.exists():
-            print(f"Threshold for dataset \'{args.dataset}\' not found. Calculating now:")
-            threshold = preprocess_dataset(args.dataset,output=mask_path, batch_size=args.batch_size)
-        else:
-            threshold = np.load(mask_path)
+    if args.adaptive_clip:
+        iqr, q3, q1 = data_module.get_IQR(N=10)
+        args.clip_val *= iqr
+        args.clip_val = abs(args.clip_val)
+        print(f"Epsilon set to {args.clip_val}")
 
     if args.domain == "mel":
         attacker = MelBasedAttackerLightning(sec=ATTACK_LEN_SEC,
@@ -138,7 +153,7 @@ def main(args):
                                             )
     
 
-    data_module = AudioDataModule(dataset_name=args.dataset,batch_size=args.batch_size,num_workers=args.num_workers)
+
 
     trainer = Trainer(max_epochs=args.epochs,devices=gpu_list)
 
