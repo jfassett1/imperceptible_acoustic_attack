@@ -11,6 +11,7 @@ conda install pytorch torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c nvi
 conda install pytorch-lightning -c conda-forge -y
 conda install matplotlib -y
 conda install scipy -y
+conda install ipykernel -y
 pip install librosa
 pip install openai-whisper==20240930
 
