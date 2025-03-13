@@ -60,6 +60,9 @@ class AudioDataModule(pl.LightningDataModule):
         """
         start = time()
         dl = self.random_all_dataloader()
+        print(f"Dataset length: {len(dl)}")
+        if (len(dl)) < N:
+            N = len(dl)
         pbar = tqdm(enumerate(dl),total=N-1)
 
         size_test = 16000 * 5 # NOTE: Only first n seconds to avoid zeroes from pad_or_clip
@@ -90,6 +93,7 @@ class AudioDataModule(pl.LightningDataModule):
         # Compute global IQR
         q1, q3 = np.percentile(waveform_values, [25, 75])
         iqr = q3 - q1
+        # print(iqr)
         print(f"Completed in {(time() - start):.6f} seconds")
         return iqr, q3, q1
 
@@ -124,12 +128,13 @@ def _load_audio_patched (self, path: str, start_time: float, end_time: float, sa
 
     start_time = int(float(start_time) * sample_rate)
     end_time = int(float(end_time) * sample_rate)
-
     kwargs = {"frame_offset": start_time, "num_frames": end_time - start_time, "backend":"soundfile"}
     return torchaudio.load(path, **kwargs)
 if __name__ == "__main__":
     ""
-    # qr = AudioDataModule(dataset_name="tedlium:dev").all_dataloader()
+    qr = AudioDataModule(dataset_name="tedlium:dev",batch_size=128,num_workers=0)
+    iqr, q3, q1 = qr.get_IQR(N=10)
+    print(iqr)
     # qq = AudioDataModule(dataset_name="librispeech:train-clean-100").all_dataloader()
     # qr = torchaudio.datasets.TEDLIUM(data_dir, subset="dev", audio_ext=".flac",download=True)
     # qq = torchaudio.datasets.LIBRISPEECH(data_dir, "dev-clean", download=True)
