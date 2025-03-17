@@ -54,15 +54,16 @@ class RawAudioAttackerLightning(LightningModule):
         super(RawAudioAttackerLightning, self).__init__()
 
         #Initialize noise. If epsilon exists, it will pre-emptively clamp.
+        # print(epsilon)
         with torch.no_grad(): #Avoid tracking the initialization
-            noise = torch.empty(1, int(sec*16000),device=self.device).uniform_(epsilon[0], epsilon[1])
+            noise = torch.empty(1, int(sec*16000),device=self.device).uniform_(-1, 1)
             if None not in epsilon:
                 noise.clamp_(min=epsilon[0], max=epsilon[1])
             
 
 
         self.noise = nn.Parameter(noise)
-        print(self.noise)
+        # print(self.noise)
         del noise
 
 
@@ -119,9 +120,6 @@ class RawAudioAttackerLightning(LightningModule):
             self.pattern = torch.logspace(0, 2, steps=80).to(self.device) * self.decay_strength
   
 
-
-
-
     def frequency_decay(self,
                           mel,
                           transformation: Literal['linear','polynomial','exponential'] = None): #TODO: Add support for more than just linspace
@@ -149,6 +147,7 @@ class RawAudioAttackerLightning(LightningModule):
 
         self.decoder.device = device
         self.decoder.update_device(device)
+        self.model.to(device)
         return self
 
     def forward(self, x, noise):
@@ -184,7 +183,7 @@ class RawAudioAttackerLightning(LightningModule):
     
     # Clamps to epsilon before passing to optimizer
     def on_before_optimizer_step(self, optimizer):
-        if self.epsilon is not None:
+        if None not in self.epsilon:
             with torch.no_grad():                       
                 self.noise.clamp_(min=self.epsilon[0], max=self.epsilon[1])
 
@@ -195,9 +194,6 @@ class RawAudioAttackerLightning(LightningModule):
 
         difference = mel1 - mel2
         difference = relu(difference)
-        # print(difference.shape)
-        # print(difference.sum())
-        # exit()
 
         return difference.sum()
 
@@ -214,7 +210,7 @@ class RawAudioAttackerLightning(LightningModule):
         x = pad_or_trim(x)
         if self.frequency_masking: # Saves a copy for PSD calculation if needed
             x_pad = x
-        eot_prob, no_speech_prob = self.forward(x,self.noise)
+        eot_prob, no_speech_prob,total_probs = self.forward(x,self.noise)
 
         loss = -torch.log(eot_prob + 1e-9).mean()
 
@@ -236,26 +232,24 @@ class RawAudioAttackerLightning(LightningModule):
             loss += self.gamma * -torch.log(no_speech_prob + 1e-9).mean() #TODO: Add custom no_speech 
             if self.debug:
                 print("NoSpeech")
+
         elif self.frequency_masking:
             if self.debug:
                 print("Frequency Masking")
-            # batch_th = self._freq_mask()
-            # print("aud",x_pad.shape)
-            # print(x_pad[:,:self.noise.shape[1]].shape)
             l_theta = self._threshold_loss(self.noise,x_pad[:,:self.noise.shape[1]], fs=sampling_rate,window_size = self.window_size)
-            
-            loss += (self.gamma * l_theta).item()
+            loss += (self.gamma * l_theta)
 
         self.debug = False
 
         
-            
-        # elif self.bark_penalty:
-        #     loss += self.gamma * 
 
-
-        self.log("train_loss", loss, batch_size=self.batch_size,prog_bar=True, on_step=True, on_epoch=True)
-        self.log("eot_pr", eot_prob.mean(), batch_size=self.batch_size,prog_bar=True, on_step=True, on_epoch=True)
+        prob_argmax = total_probs.argmax(dim=-1)
+        eot_per = (prob_argmax == self.tokenizer.eot).sum() / len(prob_argmax)
+        eot_per = round(eot_per.item(),2)
+        
+        self.log("loss", loss, batch_size=self.batch_size,prog_bar=True, on_step=True, on_epoch=True)
+        self.log("eot_per", eot_per,prog_bar=True, on_step=True)
+        self.log("eot_pr", eot_prob.mean(),prog_bar=True, on_step=True)
         return loss
     def _threshold_loss(self,noise,audio,fs=16000,window_size = 2048):
         # print("Audio min:", audio.min().item(), "Audio max:", audio.max().item())
@@ -271,7 +265,6 @@ class RawAudioAttackerLightning(LightningModule):
         
         t_max = PSD_delta.shape[1]
         theta_xs = self.mask_threshold[:,:t_max,:]
-        self.mask_threshold
         # print(theta_xs.shape)
         # print(PSD_delta.shape,theta_xs.shape)
         # theta_xs = theta_xs[:, :attack_tsteps, :] # Match theta_xs with timesteps in 
@@ -280,6 +273,7 @@ class RawAudioAttackerLightning(LightningModule):
         sum_over_freq = sum_over_freq / theta_xs.shape[2] # final dim of theta_xs is the same as floor(1 / N/2 )
         # print("q",sum_over_freq)
         return sum_over_freq.mean()
+    
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
         return optimizer
