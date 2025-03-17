@@ -5,7 +5,7 @@ import torch
 from tqdm import tqdm
 import numpy as np
 from src.utils import overlay_torch
-from pesq import pesq_batch
+# from pesq import pesq_batch
 def get_args():
     parser = argparse.ArgumentParser(description="Training Script Arguments")
 
@@ -27,17 +27,18 @@ class RawEvaluator:
     def __init__(self,
                  noise,
                  model:str,
+                 data_module,
                  dataset='dev-clean',
                  device='cuda',
                  no_attack = False,
                  prepend = False,
-                 batch_size = 1):
-            self.dataloader = AudioDataModule(dataset_name=dataset,
-                                               batch_size=batch_size,
-                                               num_workers=args.num_workers).train_dataloader()
+                 batch_size = 1,
+                 num_workers=0,
+                 ):
+            self.dataloader = data_module.val_dataloader(batch_size=1)
             self.device = device
             self.model = whisper.load_model(model).to(self.device)
-            self.noise = torch.from_numpy(np.load(noise)).to(self.device) # Load noise & convert to tensor
+            self.noise = noise.to(device) if isinstance(noise,torch.Tensor) else noise # Load noise & convert to tensor
             self.no_attack = no_attack
             self.batch_size = batch_size
             if self.noise.ndim > 1:
@@ -79,7 +80,6 @@ class RawEvaluator:
                 x, sampling_rate, transcript = batch
                 x = x.to(self.device)
                 x = self._attack(x.squeeze(), self.noise)
-                
                 output = self.model.transcribe(x)['text']
                 i += 1
                 asl += len(output)
@@ -89,27 +89,28 @@ class RawEvaluator:
                 pbar.set_postfix(running_avg=running_avg)
         
         asl /= i
-        print("Average asl:", asl)
+        print("Average Sequence Length:", asl)
         return asl
-    def calc_pesq(self,fs=16000):
-        i = 0
-        avg_pesq = 0
-        noise = self.noise.unsqueeze(0)
-        for batch in tqdm(self.dataloader):
+    
 
-            x, sampling_rate, transcript = batch
-            # x = x.squeeze()
+    # def calc_pesq(self,fs=16000):
+    #     i = 0
+    #     avg_pesq = 0
+    #     noise = self.noise.unsqueeze(0)
+    #     for batch in tqdm(self.dataloader):
 
-            deg = self._attack(x.to(self.device),noise)
-            deg = deg.cpu().numpy()
-            x = x.cpu().numpy()
-            # print(deg.shape,x.shape)
-            result = pesq_batch(16000,x,deg,mode="wb")
-            i+=1
-            avg_pesq += result
-        avg_pesq /= i
-        print("PESQ:", avg_pesq)
-        
+    #         x, sampling_rate, transcript = batch
+    #         # x = x.squeeze()
+
+    #         deg = self._attack(x.to(self.device),noise)
+    #         deg = deg.cpu().numpy()
+    #         x = x.cpu().numpy()
+    #         # print(deg.shape,x.shape)
+    #         result = pesq_batch(16000,x,deg,mode="wb")
+    #         i+=1
+    #         avg_pesq += result
+    #     avg_pesq /= i
+    #     print("PESQ:", avg_pesq)
 
 if __name__ == "__main__":
 
