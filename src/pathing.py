@@ -31,6 +31,8 @@ class AttackPath:
         self.example_dir = example_dir 
         self.data_dir    = data_dir 
         self.discrim_dir = discrim_dir
+        if ":" in args.dataset:
+            args.dataset, _ = args.dataset.split(":")
 
         self.DIR_LIST = [] # Provides structure for any given sample. Can be re-used to noise, images, etc. Use looks like ROOT_DIR / DIRECTORY_STRUCTURE / example.png
 
@@ -41,6 +43,7 @@ class AttackPath:
         self.add_dir(args.whisper_model)
         self.add_dir(args.domain)
         self.add_dir(("prepend" if args.prepend else "overlay"))
+        self.add_dir(args.dataset)
 
         #Penalty Args
         #------------------------------------------------------------------------------------------#
@@ -62,9 +65,13 @@ class AttackPath:
             num_constraints +=1
         if args.frequency_masking:
             self.add_dir("frequency_masking")
-        
-        if args.clip_val > 0:
-            self.add_dir(f"clip_val_{round(args.clip_val,5)}")
+
+        if args.adaptive_clip:
+            self.add_dir(f"clip_val_adaptive")
+        else:
+            if None not in args.clip_val:
+                self.add_dir(f"clip_val_{round(args.clip_val[1],5)}")
+
         self.add_dir(f"length_{args.attack_length}")
         self.add_dir(f"epoch_{args.epochs}")
         
