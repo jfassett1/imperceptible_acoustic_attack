@@ -6,6 +6,7 @@ Trainable Attacker classes
 import torch
 import torch.nn as nn
 from src.decoder import RawDecoder
+from src.utils import overlay_torch
 from typing import Union, Optional, Literal
 from whisper import pad_or_trim, log_mel_spectrogram
 from pathlib import Path
@@ -31,7 +32,7 @@ class RawAudioAttackerLightning(LightningModule):
                  epsilon: float = 0.02,
                  batch_size: int = 64,
                  learning_rate: float = 1e-3,
-                 discriminator = Optional[nn.Module],
+                 discriminator: Optional[nn.Module] = None,
                  noise_type: str = "uniform", #Options are ['uniform','normal']
                  gamma: float = 1.,
                  no_speech: bool = False,
@@ -40,7 +41,9 @@ class RawAudioAttackerLightning(LightningModule):
                  frequency_masking:bool = False,
                  window_size:int = 2048,
                  masker_cores:int = 16,
-                 mask_threshold : Union[np.array,np.ndarray] = None
+                 mask_threshold : Union[np.array,np.ndarray] = None,
+                 concat_mel:bool = False,
+
                  
 ):
         super(RawAudioAttackerLightning, self).__init__()
@@ -62,6 +65,7 @@ class RawAudioAttackerLightning(LightningModule):
         self.no_speech = no_speech
         self.discriminator = discriminator
         self.frequency_penalty = frequency_penalty
+        self.concat_mel = concat_mel
 
         self.frequency_masking = frequency_masking
         self.window_size = window_size
@@ -144,25 +148,26 @@ class RawAudioAttackerLightning(LightningModule):
             x = torch.cat([noise, x], dim=-1)
             
         else: #Adding Noise to tensor
+            if self.concat_mel:
+                noise = self.frequency_decay(noise,self.freq_decay)
+                noise = noise.repeat(BATCH_SIZE,1,1)
 
-            noise = self.frequency_decay(noise,self.freq_decay)
-            noise = noise.repeat(BATCH_SIZE,1,1)
+                padding = torch.zeros_like(x)[:,:,:-noise.shape[-1]]
 
-            padding = torch.zeros_like(x)[:,:,:-noise.shape[-1]]
+                noise_padded = torch.cat([noise,padding],dim=-1)
+                x = noise_padded + x
+            else:
+                
+                x = overlay_torch(noise,x)
+                x = log_mel_spectrogram(x)
 
-            noise_padded = torch.cat([noise,padding],dim=-1)
-            x = noise_padded + x
-
+            
         return self.decoder.get_eot_prob(x)
     
     # Clamps to epsilon before passing to optimizer
     def on_before_optimizer_step(self, optimizer):
         if self.epsilon != -1:
-            with torch.no_grad():
-                # norm = self.noise.norm(p=torch.inf,dim=1,keepdim=True)
-                # factor = torch.clamp(norm / self.epsilon, min=1.0)
-                # self.noise /= factor
-                # self.noise.clamp_(max=0.02)
+            with torch.no_grad():   
                 self.noise.clamp_(min=-self.epsilon, max=self.epsilon)
 
     def _mel_difference(self,mel1,mel2):
@@ -186,13 +191,11 @@ class RawAudioAttackerLightning(LightningModule):
         x = pad_or_trim(x)
         if self.frequency_masking: # Saves a copy for PSD calculation if needed
             x_pad = x
-   
-        x = log_mel_spectrogram(x)
+        # x = log_mel_spectrogram(x)
         # print("SHAPE",x.shape)
-        noise_mel = log_mel_spectrogram(self.noise)
+        # noise_mel = log_mel_spectrogram(self.noise)
         # probs = self.forward(x) #Gets probabilities
-        eot_prob, no_speech_prob = self.forward(x,noise_mel)
-
+        eot_prob, no_speech_prob = self.forward(x,self.noise)
         loss = -torch.log(eot_prob + 1e-9).mean()
         if self.discriminator is not None:
             if epoch_number % 5 == 0: #Lagging the discriminator TODO: Make this a hyperparameter
@@ -200,6 +203,7 @@ class RawAudioAttackerLightning(LightningModule):
             loss += self.gamma * self.discriminator(log_mel_spectrogram(self.noise))
 
         elif self.frequency_penalty:
+            noise_mel = log_mel_spectrogram(self.noise)
             loss += self.gamma * self._mel_difference(x,noise_mel)
             
         elif self.no_speech:
@@ -255,18 +259,23 @@ class RawAudioAttackerLightning(LightningModule):
 
 if __name__ == "__main__":
     device = "cuda"
-    mt = np.load("/home/jaydenfassett/audioversarial/imperceptible/thresholds/train-clean-100.np.npy")
-    model = RawAudioAttackerLightning(prepend=False,discriminator=None,frequency_masking=True,mask_threshold=mt).to(device)
+    # mt = np.load("/home/jaydenfassett/audioversarial/imperceptible/thresholds/train-clean-100.np.npy")
+    model = RawAudioAttackerLightning(prepend=False).to(device)
 
 
     x = whisper.load_audio("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")
-    x = x.reshape(1,-1)
+    x = torch.from_numpy(x)
+    x = x.unsqueeze(0)
+    x = torch.concat([x,x])
+    # print(x.shape)
 
+    # x = torch.tensor([x,x]).to(device)
     # print(x.shape)
     # print(model.noise.shape)
     # qq = log_mel_spectrogram(x)
     r = model.training_step((x,16000,1),1)
     print(r)
+    # print(r)
     # model.forward(torch.tensor(x).to(device),torch.randn(1,100).to(device))
     # x = torch.tensor(x).unsqueeze(0)
     # x = torch.cat([x,x,x,x],dim=0)
