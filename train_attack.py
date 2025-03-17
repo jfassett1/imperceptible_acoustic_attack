@@ -40,7 +40,7 @@ def get_args():
     parser.add_argument("--no_speech",action="store_true",default=False,help="Whether to use Nospeech in loss function")
 
     #Epsilon Constraints
-    parser.add_argument('--clip_val',type=float,default = 0.02,help="Clamping Value")
+    parser.add_argument('--clip_val',type=float, default = None,help="Clamping Value")
     parser.add_argument('--adaptive_clip',action="store_true",default = False,help="Whether to adapt the clipping value to the dataset.")
 
     # Data processing
@@ -85,6 +85,7 @@ def get_args():
     parser.add_argument('--save_ppt',action="store_true",default=False,help="Whether to save powerpoint with examples")
     parser.add_argument('--log_path',action="store_true",default=True,help="Whether to save paths in CSV")
     parser.add_argument('--debug',action="store_true",default=False,help="Print when modules activate")
+    parser.add_argument('--eval',action="store_true",default=False,help="Evaluation of model")
 
     # Debugging and testing
     # parser.add_argument('--debug', action='store_true', help='Run in debug mode with minimal data')
@@ -127,11 +128,14 @@ def main(args):
         iqr, q3, q1 = data_module.get_IQR(N=10)
         args.clip_val = (q1 - 1.5*iqr,q3 + 1.5*iqr)
         print(f"Epsilon set to {args.clip_val}")
+    elif args.clip_val is None:
+        args.clip_val = (None,None)
     else:
         args.clip_val = (-args.clip_val,args.clip_val) # Duplicate for bounds
 
     # print(args.clip_val)
     if args.domain == "mel":
+        raise NotImplementedError # NOTE: Deprecated
         attacker = MelBasedAttackerLightning(sec=ATTACK_LEN_SEC,
                                             prepend=args.prepend,
                                             batch_size=args.batch_size,
@@ -161,15 +165,12 @@ def main(args):
 
 
 
-    trainer = Trainer(max_epochs=args.epochs,devices=gpu_list)
-
-
+    trainer = Trainer(max_epochs=args.epochs,val_check_interval=0.2,devices=gpu_list,enable_progress_bar=True)
 
     if not args.no_train:
-        trainer.fit(attacker,data_module)
+        trainer.fit(attacker,data_module.train_dataloader(),data_module.val_dataloader())
 
     PATHS = AttackPath(args,ROOT_DIR)
-
     print(f"Saving to {PATHS.noise_path}")
     if args.domain == "raw_audio":
         attacker.dump(PATHS.noise_path)
@@ -177,52 +178,43 @@ def main(args):
         torch.save(attacker.noise,PATHS.noise_path)
 
     # audio_sample = wavfile.read("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")[1]
+    asl = None
+    if args.eval:
+        from eval import RawEvaluator
+        noise = attacker.noise
+        evaluator = RawEvaluator(noise,
+                                 args.whisper_model,
+                                 num_workers=args.num_workers,
+                                 data_module=data_module)
+        asl = evaluator.calc_asl()
 
     if args.show:
         from src.visual_utils import save_photo_overlay, save_photo_prepend 
 
-
-
         noise = attacker.noise.detach().cpu().numpy().squeeze()
-        # num_samples = int(1 * 16000)
-        # noise = np.random.normal(0, 0.001, num_samples)
-        # sample_audio2 = wavfile.read(ROOT_DIR/"original_audio.wav")[1]
         sample_audio = data_module.sample[0].cpu().squeeze(0).numpy()
 
-        # print(sample_audio.shape)
-        # print(sample_audio2.shape)
-        # exit()
-        #sAVING AUDIO
+        #Saving Audio
         audio_list = [sound for sound in (PATHS.example_dir / "sample_sounds").glob("*.wav")] # List of paths
         images_list,audio_list = audio_to_img(attacker.noise,audio_list,sample_audio,PATHS.audio_dir)
 
         if args.prepend:
             save_photo_prepend(noise,sample_audio,PATHS.img_dir/"plot.png")
-            # raise NotImplementedError # Need to write function for prepending & saving
         else:
             save_photo_overlay(noise,sample_audio,PATHS.img_dir/"plot.png")
         print(f"Saving image to {PATHS.img_dir/'plot.png'}")
 
     if args.save_ppt:
         raise NotImplementedError
+    
     if args.log_path:
         import sys
         import shlex
         command = shlex.join(sys.argv)
         txt_file = ROOT_DIR / "paths.txt"
-        row = f"{command}   {str(PATHS.noise_path)} \n"
+        row = f"{command} | {str(PATHS.noise_path)} |  {asl}\n"
         with open(txt_file, "a") as file:
             file.write(row)
-
-        # TEMP_DIR = EXAMPLE_SAVEPATH / "temp"
-        # TEMP_DIR.mkdir(exist_ok=True,parents=True)
-
-
-        # print(audio_list)
-        # print("NUTS",images_list,audio_list)
-        # generate_example_ppt(images_list,audio_list,PPT_DIR / "examples.pptx")
-
-    
         return
 
 
