@@ -66,8 +66,8 @@ def save_photo_overlay(noise, audio, savepath):
     
     librosa.display.specshow(mel_spec2, sr=16000, hop_length=hop_length, 
                             x_axis='time', y_axis='mel', ax=axes[1],shading="gouraud",cmap="magma")
-    axes[0].set_title(f"Unperturbed Audio ({len(combined_audio)/160000:.2f} seconds)")
-    axes[1].set_title(f"Perturbed Audio ({len(combined_audio)/160000:.2f} seconds)")
+    axes[0].set_title(f"Unperturbed Audio ({len(combined_audio)/16000:.2f} seconds)")
+    axes[1].set_title(f"Perturbed Audio ({len(combined_audio)/16000:.2f} seconds)")
     # Save the figure
     plt.tight_layout()
     plt.savefig(savepath)
