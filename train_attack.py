@@ -84,6 +84,7 @@ def get_args():
     parser.add_argument('--show',action="store_true",default=False,help="Whether to save image")
     parser.add_argument('--save_ppt',action="store_true",default=False,help="Whether to save powerpoint with examples")
     parser.add_argument('--log_path',action="store_true",default=True,help="Whether to save paths in CSV")
+    parser.add_argument('--debug',action="store_true",default=False,help="Print when modules activate")
 
     # Debugging and testing
     # parser.add_argument('--debug', action='store_true', help='Run in debug mode with minimal data')
@@ -119,14 +120,17 @@ def main(args):
     
     data_module = AudioDataModule(dataset_name=args.dataset,
                                 batch_size=args.batch_size,
-                                num_workers=args.num_workers)
+                                num_workers=args.num_workers,
+                                attack_len=args.attack_length)
 
     if args.adaptive_clip:
         iqr, q3, q1 = data_module.get_IQR(N=10)
-        args.clip_val *= iqr
-        args.clip_val = abs(args.clip_val)
+        args.clip_val = (q1 - 1.5*iqr,q3 + 1.5*iqr)
         print(f"Epsilon set to {args.clip_val}")
+    else:
+        args.clip_val = (-args.clip_val,args.clip_val) # Duplicate for bounds
 
+    # print(args.clip_val)
     if args.domain == "mel":
         attacker = MelBasedAttackerLightning(sec=ATTACK_LEN_SEC,
                                             prepend=args.prepend,
@@ -150,6 +154,8 @@ def main(args):
                                             window_size = args.window_size,
                                             masker_cores= args.masker_cores,
                                             mask_threshold = threshold,
+                                            debug=args.debug,
+                                            frequency_penalty=args.frequency_penalty,
                                             )
     
 
@@ -170,7 +176,7 @@ def main(args):
     else:
         torch.save(attacker.noise,PATHS.noise_path)
 
-    audio_sample = wavfile.read("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")[1]
+    # audio_sample = wavfile.read("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")[1]
 
     if args.show:
         from src.visual_utils import save_photo_overlay, save_photo_prepend 
@@ -178,12 +184,18 @@ def main(args):
 
 
         noise = attacker.noise.detach().cpu().numpy().squeeze()
-        sample_audio = wavfile.read(ROOT_DIR/"original_audio.wav")[1]
+        # num_samples = int(1 * 16000)
+        # noise = np.random.normal(0, 0.001, num_samples)
+        # sample_audio2 = wavfile.read(ROOT_DIR/"original_audio.wav")[1]
+        sample_audio = data_module.sample[0].cpu().squeeze(0).numpy()
 
-
+        # print(sample_audio.shape)
+        # print(sample_audio2.shape)
+        # exit()
         #sAVING AUDIO
         audio_list = [sound for sound in (PATHS.example_dir / "sample_sounds").glob("*.wav")] # List of paths
-        images_list,audio_list = audio_to_img(attacker.noise,audio_list,audio_sample,PATHS.audio_dir)
+        images_list,audio_list = audio_to_img(attacker.noise,audio_list,sample_audio,PATHS.audio_dir)
+
         if args.prepend:
             save_photo_prepend(noise,sample_audio,PATHS.img_dir/"plot.png")
             # raise NotImplementedError # Need to write function for prepending & saving
