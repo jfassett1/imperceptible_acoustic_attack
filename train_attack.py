@@ -8,13 +8,15 @@ from pathlib import Path
 from typing import Union, Optional, Literal
 import time
 from scipy.io import wavfile
-from src.data import AudioDataModule, data_dir
+from src.data import AudioDataModule, data_dir, clipping
 from src.attacker.mel_attacker import MelBasedAttackerLightning
 from src.attacker.raw_attacker import RawAudioAttackerLightning
 # from src.discriminator import MelDiscriminator
-from src.visual_utils import audio_to_img
-from src.pathing import AttackPath, ROOT_DIR
+from src.visual_utils import audio_to_img, show
+from src.pathing import AttackPath, ROOT_DIR, log_path
 from src.masking.preprocess_threshold import preprocess_dataset
+from src.masking.mask_utils import masking
+from eval import evaluate
 
 
 
@@ -99,16 +101,9 @@ def main(args):
     #ARG HANDLING
     #------------------------------------------------------------------------------------------#
     args.dataset = args.dataset.lower()
-    if args.frequency_masking:
-        threshold_dir = (ROOT_DIR / args.dataset.split(":")[0] / "thresholds") # If no threshold path, create it
-        threshold_dir.mkdir(exist_ok=True,parents=True)
+    args.root_dir = ROOT_DIR
 
-        mask_path = threshold_dir / f"{args.dataset}.np.npy"
-        if not mask_path.exists():
-            print(f"Threshold for dataset \'{args.dataset}\' not found. Calculating now:")
-            threshold = preprocess_dataset(args.dataset,output=mask_path, batch_size=args.batch_size)
-        else:
-            threshold = np.load(mask_path)
+    threshold = masking(args)
 
     discriminator = None
     if args.use_discriminator:
@@ -124,14 +119,8 @@ def main(args):
                                 num_workers=args.num_workers,
                                 attack_len=args.attack_length)
 
-    if args.adaptive_clip:
-        iqr, q3, q1 = data_module.get_IQR(N=10)
-        args.clip_val = (q1 - 1.5*iqr,q3 + 1.5*iqr)
-        print(f"Epsilon set to {args.clip_val}")
-    elif args.clip_val is None:
-        args.clip_val = (None,None)
-    else:
-        args.clip_val = (-args.clip_val,args.clip_val) # Duplicate for bounds
+    #Handle clipping args
+    clipping(data_module,args)
 
     # print(args.clip_val)
     if args.domain == "mel":
@@ -172,6 +161,7 @@ def main(args):
 
     PATHS = AttackPath(args,ROOT_DIR)
     print(f"Saving to {PATHS.noise_path}")
+
     if args.domain == "raw_audio":
         attacker.dump(PATHS.noise_path)
     else:
@@ -180,41 +170,18 @@ def main(args):
     # audio_sample = wavfile.read("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")[1]
     asl = None
     if args.eval:
-        from eval import RawEvaluator
-        noise = attacker.noise
-        evaluator = RawEvaluator(noise,
-                                 args.whisper_model,
-                                 num_workers=args.num_workers,
-                                 data_module=data_module)
-        asl = evaluator.calc_asl()
-
+        evaluate(attacker.noise,
+                 data_module,
+                 args)
+        
     if args.show:
-        from src.visual_utils import save_photo_overlay, save_photo_prepend 
-
-        noise = attacker.noise.detach().cpu().numpy().squeeze()
-        sample_audio = data_module.sample[0].cpu().squeeze(0).numpy()
-
-        #Saving Audio
-        audio_list = [sound for sound in (PATHS.example_dir / "sample_sounds").glob("*.wav")] # List of paths
-        images_list,audio_list = audio_to_img(attacker.noise,audio_list,sample_audio,PATHS.audio_dir)
-
-        if args.prepend:
-            save_photo_prepend(noise,sample_audio,PATHS.img_dir/"plot.png")
-        else:
-            save_photo_overlay(noise,sample_audio,PATHS.img_dir/"plot.png")
-        print(f"Saving image to {PATHS.img_dir/'plot.png'}")
-
-    if args.save_ppt:
-        raise NotImplementedError
+        show(attacker.noise.detach().cpu().numpy().squeeze(),
+             data_module.sample[0].cpu().squeeze(0).numpy(),
+             PATHS,
+             args.prepend)
     
     if args.log_path:
-        import sys
-        import shlex
-        command = shlex.join(sys.argv)
-        txt_file = ROOT_DIR / "paths.txt"
-        row = f"{command} | {str(PATHS.noise_path)} |  {asl}\n"
-        with open(txt_file, "a") as file:
-            file.write(row)
+        log_path(PATHS,asl)
         return
 
 

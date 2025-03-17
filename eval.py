@@ -23,6 +23,15 @@ def get_args():
     return args
 
 
+def evaluate(noise,data_module,args):
+    noise = noise
+    evaluator = RawEvaluator(noise,
+                                args.whisper_model,
+                                num_workers=args.num_workers,
+                                data_module=data_module)
+    asl = evaluator.calc_asl()
+
+
 class RawEvaluator:
     def __init__(self,
                  noise,
@@ -62,7 +71,6 @@ class RawEvaluator:
             x = torch.cat([noise,x],dim=-1).to(self.device)
         else:
             x = overlay_torch(noise,x)
-        
 
         return x
 

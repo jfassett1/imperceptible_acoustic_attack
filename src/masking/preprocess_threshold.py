@@ -15,7 +15,9 @@ def preprocess_dataset(dataset,output, batch_size=64):
     mean_threshold = None
     for i, (waveform, sample_rate, transcript) in pbar:
         # print(waveform.shape)
-        waveform = waveform[:,:16000]
+        # exit()
+        # print(waveform.shape)
+        waveform = waveform[:,:160_000] #Only getting first 10 seconds to avoid including padding
         if batch_size != 1:
             sample_rate = sample_rate[0]
         
@@ -36,4 +38,5 @@ def preprocess_dataset(dataset,output, batch_size=64):
 if __name__ == "__main__":
 
     # print("s")
-    preprocess_dataset(dataset="dev-clean",output="/home/jaydenfassett/audioversarial/imperceptible/thresholds/tst")
+    for dset in tqdm(['dev-clean','test-clean','train-clean-100',"train-other-500"]):
+        preprocess_dataset(dataset=dset,output=f"/home/jaydenfassett/audioversarial/imperceptible/thresholds/{dset}.np.npy")

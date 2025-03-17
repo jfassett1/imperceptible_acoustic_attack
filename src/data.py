@@ -14,6 +14,16 @@ data_dir = Path("/media/drive1/jaydenfassett/audio_data")
 
 PAD_PLACEHOLDER = 1.337e-10
 
+def clipping(data_module,args):
+    if args.adaptive_clip:
+        iqr, q3, q1 = data_module.get_IQR(N=10)
+        args.clip_val = (q1 - 1.5*iqr,q3 + 1.5*iqr)
+        print(f"Epsilon set to {args.clip_val}")
+    elif args.clip_val is None:
+        args.clip_val = (None,None)
+    else:
+        args.clip_val = (-args.clip_val,args.clip_val) # Duplicate for bounds
+
 class AudioDataModule(pl.LightningDataModule):
     def __init__(self, dataset_name:str ="librispeech:dev-clean", attack_len = 1,batch_size=32, num_workers=0):
         super().__init__()
@@ -136,8 +146,11 @@ class AudioDataModule(pl.LightningDataModule):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, 
                           num_workers=self.num_workers, shuffle=True, collate_fn=self.collate_fn)
 
-    def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, 
+    def val_dataloader(self,batch_size=None):
+        batch_size_ld = self.batch_size
+        if batch_size:
+            batch_size_ld = batch_size
+        return DataLoader(self.val_dataset, batch_size=batch_size_ld, 
                           num_workers=self.num_workers, shuffle=False, collate_fn=self.collate_fn)
     def all_dataloader(self):
         return DataLoader(self.dataset, batch_size=self.batch_size, 

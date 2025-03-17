@@ -9,6 +9,24 @@ import whisper
 
 sample_raw = whisper.load_audio("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")
 
+
+def show(noise,
+         sample_audio,
+         PATHS,
+         prepend:bool=False):
+
+
+
+    #Saving Audio
+    # audio_list = [sound for sound in (PATHS.example_dir / "sample_sounds").glob("*.wav")] # List of paths
+    # images_list,audio_list = audio_to_img(noise,audio_list,sample_audio,PATHS.audio_dir)
+
+    if prepend:
+        save_photo_prepend(noise,sample_audio,PATHS.img_dir/"plot.png")
+    else:
+        save_photo_overlay(noise,sample_audio,PATHS.img_dir/"plot.png")
+    print(f"Saving image to {PATHS.img_dir/'plot.png'}")
+
 def raw_to_mel(x,device="cpu"):
     x = whisper.pad_or_trim(x)
     mel = whisper.log_mel_spectrogram(x).to(device).unsqueeze(dim=0)

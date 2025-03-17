@@ -4,7 +4,8 @@ Used to be in train_attack.py
 
 """
 from pathlib import Path
-
+import sys
+import shlex
 
 ROOT_DIR = Path(__file__).parent.parent
 
@@ -12,6 +13,16 @@ NOISE_DIR = ROOT_DIR / "noise"
 EXAMPLE_DIR = ROOT_DIR / "examples"
 DATA_DIR = ROOT_DIR / "data" 
 DISCRIM_PATH = ROOT_DIR / "discriminator" 
+
+
+def log_path(PATHS,asl):
+
+    command = shlex.join(sys.argv)
+    txt_file = ROOT_DIR / "paths.txt"
+    row = f"{command} | {str(PATHS.noise_path)} |  {asl}\n"
+    with open(txt_file, "a") as file:
+        file.write(row)
+    return
 
 
 class AttackPath:
@@ -108,6 +119,7 @@ class AttackPath:
         if base is None:
             base = self.DIR_LIST
         base.append(curr)
+
 
     #------------------------------------------------------------------------------------------#
    
