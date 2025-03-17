@@ -47,6 +47,8 @@ class RawAudioAttackerLightning(LightningModule):
                  masker_cores:int = 16,
                  mask_threshold : Union[np.array,np.ndarray] = None,
                  concat_mel:bool = False,
+                 imper_epochs:int = 0,
+                 train_epochs:int = 1,
                  debug:bool=False # Prints all special activated sections
 
                  
@@ -55,16 +57,18 @@ class RawAudioAttackerLightning(LightningModule):
 
         #Initialize noise. If epsilon exists, it will pre-emptively clamp.
         # print(epsilon)
+        
         with torch.no_grad(): #Avoid tracking the initialization
             noise = torch.empty(1, int(sec*16000),device=self.device).uniform_(-1, 1)
             if None not in epsilon:
                 noise.clamp_(min=epsilon[0], max=epsilon[1])
             
+        # print("Noise strides before:", noise.stride())
+        self.noise = nn.Parameter(noise.contiguous().reshape(1, -1))
+        # print("Noise strides after:", self.noise.stride())
 
 
-        self.noise = nn.Parameter(noise)
         # print(self.noise)
-        del noise
 
 
         #General hyperparameters for attack
@@ -73,6 +77,8 @@ class RawAudioAttackerLightning(LightningModule):
         self.model = whisper.load_model(model).to(self.device)
         self.batch_size = batch_size
         self.learning_rate = learning_rate
+        self.imper_epochs = imper_epochs
+        self.train_epochs = train_epochs
 
         # Imperceptibility parameters
         self.epsilon = epsilon
@@ -200,10 +206,92 @@ class RawAudioAttackerLightning(LightningModule):
     def on_train_epoch_start(self):
         #TODO: Add discriminator training here
         return
-    
+    def on_train_epoch_end(self):
+        # Switch optimizer for fine-tuning
+        if self.current_epoch == (self.trainer.max_epochs - self.imper_epochs):
+            #Reset the optimizer so it doesn't keep momentum.
+            self.optimizer = torch.optim.Adam(self.parameters(), lr=self.gamma)            
 
+    
+    def _main_training_phase(self, x):
+        """
+        Main training phase: uses the default forward pass and loss.
+        Returns the loss and a dictionary of additional metrics.
+        """
+        # Indicates main phase (could be logged if needed)
+        finetune = False  
+        eot_prob, no_speech_prob, total_probs = self.forward(x, self.noise)
+        loss = -torch.log(eot_prob + 1e-9).mean()
+        
+        # Calculate extra metrics
+        prob_argmax = total_probs.argmax(dim=-1)
+        eot_per = (prob_argmax == self.tokenizer.eot).sum() / len(prob_argmax)
+        metrics = {
+            "eot_per": round(eot_per.item(), 2),
+            "eot_pr": eot_prob.mean()
+        }
+        return loss, metrics    
+    def _fine_tuning_phase(self, x, sampling_rate):
+        """
+        Fine-tuning phase: chooses different loss functions based on which mode is active.
+        Returns the loss and (optionally) a dictionary of additional metrics.
+        """
+        finetune = True 
+        metrics = {} 
+        x_pad = x
+        # Branch based on fine-tuning mode
+        if self.discriminator is not None:
+            if self.debug:
+                print("Discriminator")
+            # Optionally, add logic here if you want to lag the discriminator
+            loss = self.discriminator(log_mel_spectrogram(self.noise))
+
+        elif self.frequency_penalty:
+            if self.debug:
+                print("Frequency Penalty")
+            noise_mel = log_mel_spectrogram(self.noise)
+            loss = self._mel_difference(log_mel_spectrogram(x), noise_mel)
+
+        elif self.no_speech:
+            no_speech_prob = self.forward(x, self.noise)[1] 
+            loss = -torch.log(no_speech_prob + 1e-9).mean()
+
+            if self.debug:
+                print("NoSpeech")
+
+        elif self.frequency_masking:
+            if self.debug:
+                print("Frequency Masking")
+            # x_pad should have been computed in training_step if frequency_masking is True.
+            l_theta = self._threshold_loss(self.noise, x_pad[:, :self.noise.shape[1]],
+                                        fs=sampling_rate, window_size=self.window_size)
+            loss = l_theta
+        else:
+            return NameError
+        
+        return loss, metrics
+    
     def training_step(self, batch, batch_idx):
         # Unpack the batch
+        x, sampling_rate, transcript = batch
+        epoch_number = self.current_epoch + 1 # one-indexing epoch num for convenience
+
+        x = pad_or_trim(x)
+
+        # print(epoch_number,self.train_epochs)
+        if epoch_number <= self.train_epochs:
+            loss, metrics = self._main_training_phase(x)
+        else:
+            loss, metrics = self._fine_tuning_phase(x, sampling_rate)
+
+        self.debug = False
+
+
+        self.log("loss", loss, batch_size=self.batch_size,prog_bar=True, on_step=True, on_epoch=True)
+        for key, value in metrics.items():
+            self.log(key, value, prog_bar=True, on_step=True)
+        return loss
+    def validation_step(self,batch,batch_idx):
         x, sampling_rate, transcript = batch
         epoch_number = self.current_epoch + 1 # one-indexing epoch num for convenience
 
@@ -213,44 +301,9 @@ class RawAudioAttackerLightning(LightningModule):
         eot_prob, no_speech_prob,total_probs = self.forward(x,self.noise)
 
         loss = -torch.log(eot_prob + 1e-9).mean()
-
-        if self.discriminator is not None:
-            if self.debug:
-                print("Discriminator")
-            if epoch_number % 5 == 0: #Lagging the discriminator TODO: Make this a hyperparameter
-                pass
-            loss += self.gamma * self.discriminator(log_mel_spectrogram(self.noise))
-
-        elif self.frequency_penalty:
-            if self.debug:
-                print("Frequency Penalty")
-
-            noise_mel = log_mel_spectrogram(self.noise)
-            loss += self.gamma * self._mel_difference(log_mel_spectrogram(x),noise_mel)
-            
-        elif self.no_speech:
-            loss += self.gamma * -torch.log(no_speech_prob + 1e-9).mean() #TODO: Add custom no_speech 
-            if self.debug:
-                print("NoSpeech")
-
-        elif self.frequency_masking:
-            if self.debug:
-                print("Frequency Masking")
-            l_theta = self._threshold_loss(self.noise,x_pad[:,:self.noise.shape[1]], fs=sampling_rate,window_size = self.window_size)
-            loss += (self.gamma * l_theta)
-
-        self.debug = False
-
-        
-
-        prob_argmax = total_probs.argmax(dim=-1)
-        eot_per = (prob_argmax == self.tokenizer.eot).sum() / len(prob_argmax)
-        eot_per = round(eot_per.item(),2)
-        
-        self.log("loss", loss, batch_size=self.batch_size,prog_bar=True, on_step=True, on_epoch=True)
-        self.log("eot_per", eot_per,prog_bar=True, on_step=True)
-        self.log("eot_pr", eot_prob.mean(),prog_bar=True, on_step=True)
+        self.log("val_loss", loss, prog_bar=True)
         return loss
+    
     def _threshold_loss(self,noise,audio,fs=16000,window_size = 2048):
         # print("Audio min:", audio.min().item(), "Audio max:", audio.max().item())
         # theta_xs, psd_max, PSD_x  = generate_th_batch(audio,
