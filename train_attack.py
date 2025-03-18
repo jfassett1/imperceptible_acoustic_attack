@@ -17,9 +17,8 @@ from src.pathing import AttackPath, ROOT_DIR, log_path
 from src.masking.preprocess_threshold import preprocess_dataset
 from src.masking.mask_utils import masking
 from eval import evaluate
-
-
-
+import torch.distributed as dist
+import sys
 
 def get_args():
     parser = argparse.ArgumentParser(description="Training Script Arguments")
@@ -58,11 +57,12 @@ def get_args():
     # parser.add_argument("--lambda",type=float,default=1.,help="Lambda value. Represents strength of discriminator during training") 
 
     #Arguments for frequency decay
-    parser.add_argument("--frequency_decay", type = str, choices = ['linear','polynomial','logarithmic','exponential'], default=None, help="Whether to use frequency decay, and what pattern of frequency decay") #TODO: Replace default with whatever works best for final code submission
+    
+    parser.add_argument("--frequency_decay",action="store_true",default=False,help="Whether to use frequency decay")
+    parser.add_argument("--decay_pattern", type = str, choices = ['linear','polynomial','logarithmic','exponential'], default=None, help="Whether to use frequency decay, and what pattern of frequency decay") #TODO: Replace default with whatever works best for final code submission
     parser.add_argument("--decay_strength",type = float, default = 1., help = "Weight of the frequency decay")
 
     parser.add_argument("--frequency_penalty", action="store_true", default=False, help="Toggle for MSE frequency penalty")
-
     #Arguments for frequency masking
     parser.add_argument("--frequency_masking", action="store_true", default=False, help="Toggle for frequency masking")
     parser.add_argument("--masker_cores", type=int, default = 0, help= "Number of cores allocated to masking threshold.")
@@ -85,7 +85,7 @@ def get_args():
     #Saving Settings
     parser.add_argument('--show',action="store_true",default=False,help="Whether to save image")
     parser.add_argument('--save_ppt',action="store_true",default=False,help="Whether to save powerpoint with examples")
-    parser.add_argument('--log_path',action="store_true",default=True,help="Whether to save paths in CSV")
+    parser.add_argument('--log_path',action="store_true",default=False,help="Whether to save paths in CSV")
     parser.add_argument('--debug',action="store_true",default=False,help="Print when modules activate")
     parser.add_argument('--eval',action="store_true",default=False,help="Evaluation of model")
 
@@ -102,6 +102,7 @@ def main(args):
     #------------------------------------------------------------------------------------------#
     args.dataset = args.dataset.lower()
     args.root_dir = ROOT_DIR
+    imper_epochs = 0
 
     threshold = masking(args)
 
@@ -118,6 +119,10 @@ def main(args):
                                 batch_size=args.batch_size,
                                 num_workers=args.num_workers,
                                 attack_len=args.attack_length)
+    # print([args.frequency_decay, args.frequency_penalty, args.frequency_masking, args.use_discriminator])
+    if any(x is not False for x in [args.frequency_penalty, args.frequency_masking, args.use_discriminator]):
+        print("Adding fine-tuning epoch(s)")
+        imper_epochs = 1
 
     #Handle clipping args
     clipping(data_module,args)
@@ -141,7 +146,7 @@ def main(args):
                                             epsilon=args.clip_val,
                                             gamma = args.gamma,
                                             no_speech=args.no_speech,
-                                            frequency_decay=(args.frequency_decay,args.decay_strength),
+                                            frequency_decay=(args.decay_pattern,args.decay_strength),
                                             learning_rate=args.learning_rate,
                                             frequency_masking=args.frequency_masking,
                                             window_size = args.window_size,
@@ -149,15 +154,26 @@ def main(args):
                                             mask_threshold = threshold,
                                             debug=args.debug,
                                             frequency_penalty=args.frequency_penalty,
+                                            train_epochs=args.epochs,
+                                            imper_epochs=imper_epochs,
                                             )
     
 
 
 
-    trainer = Trainer(max_epochs=args.epochs,val_check_interval=0.2,devices=gpu_list,enable_progress_bar=True)
+    trainer = Trainer(max_epochs=args.epochs + imper_epochs,
+                      val_check_interval=0.8,
+                      devices=gpu_list,
+                      enable_progress_bar=True)
 
     if not args.no_train:
         trainer.fit(attacker,data_module.train_dataloader(),data_module.val_dataloader())
+    
+    # Ending the
+    if dist.is_initialized():
+        dist.barrier()
+    if trainer.global_rank != 0:
+        sys.exit(0)
 
     PATHS = AttackPath(args,ROOT_DIR)
     print(f"Saving to {PATHS.noise_path}")
@@ -169,10 +185,15 @@ def main(args):
 
     # audio_sample = wavfile.read("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")[1]
     asl = None
+    # torch.cuda.set_device()
+    # data_module.device = int(args.gpus[0])
+
     if args.eval:
-        evaluate(attacker.noise,
+        # torch.cuda.set_device(int())
+        
+        evaluate(attacker.noise.detach(),
                  data_module,
-                 args)
+                 args,)
         
     if args.show:
         show(attacker.noise.detach().cpu().numpy().squeeze(),
