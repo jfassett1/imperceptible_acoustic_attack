@@ -4,3 +4,7 @@ noise/
 examples/*
 !examples/sample_sounds/
 *.pyc
+.vscode/
+notebooks/
+*.png
+*.ipynb
