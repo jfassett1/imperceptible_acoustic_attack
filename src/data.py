@@ -148,7 +148,7 @@ class AudioDataModule(pl.LightningDataModule):
 
     def val_dataloader(self,batch_size=None):
         batch_size_ld = self.batch_size
-        if batch_size:
+        if batch_size is not None:
             batch_size_ld = batch_size
         return DataLoader(self.val_dataset, batch_size=batch_size_ld, 
                           num_workers=self.num_workers, shuffle=False, collate_fn=self.collate_fn)
