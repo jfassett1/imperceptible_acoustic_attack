@@ -1,5 +1,5 @@
 """
-Trainable Attacker classes
+Trainable Attacker class
 
 
 """
@@ -12,6 +12,8 @@ import torch
 import torch.nn as nn
 import whisper
 from pytorch_lightning import LightningModule
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+
 from torch.nn.functional import relu
 from whisper import log_mel_spectrogram, pad_or_trim
 
@@ -19,11 +21,24 @@ from src.decoder import RawDecoder
 from src.masking.mask_threshold import compute_PSD_matrix_batch
 from src.utils import overlay_torch
 from src.masking.mel_mask import generate_mel_th, log_mel_spectrogram_raw
+from pytorch_lightning.callbacks import Callback
 
 # For preventing FutureWarning log from whisper.
 whisper.torch.load = functools.partial(whisper.torch.load, weights_only=True)
 
 
+class StopWhenLossBelowThreshold(Callback):
+    def __init__(self, threshold=0.1, monitor='val_loss'):
+        self.threshold = threshold
+        self.monitor = monitor
+
+    def on_validation_end(self, trainer, pl_module):
+        metrics = trainer.callback_metrics
+        current = metrics.get(self.monitor)
+
+        if current is not None and current < self.threshold:
+            print(f"Stopping: {self.monitor} = {current:.4f} < {self.threshold}")
+            trainer.should_stop = True
 class RawAudioAttackerLightning(LightningModule):
     """
     LightningModule that prepends noise for adversarial attacks, based on
@@ -70,10 +85,6 @@ class RawAudioAttackerLightning(LightningModule):
 
         # print("Noise strides before:", noise.stride())
         self.noise = nn.Parameter(noise.contiguous().reshape(1, -1))
-        # self.noise = nn.Parameter(torch.randn(1,int(sec*16000)))
-        # print("Noise strides after:", self.noise.stride())
-
-        # print(self.noise)
 
         # General hyperparameters for attack
         self.prepend = prepend
@@ -218,11 +229,11 @@ class RawAudioAttackerLightning(LightningModule):
         # TODO: Add discriminator training here
         return
 
-    def on_train_epoch_end(self):
+    def reset_optimizer(self):
         # Switch optimizer for fine-tuning
-        if self.current_epoch == (self.trainer.max_epochs - self.imper_epochs):
+        # if self.current_epoch == (self.trainer.max_epochs - self.imper_epochs):
             # Reset the optimizer so it doesn't keep momentum.
-            self.optimizer = torch.optim.Adam(self.parameters(), lr=self.gamma)
+        self.optimizer = torch.optim.Adam(self.parameters(), lr=self.gamma)
 
     def _main_training_phase(self, x, sampling_rate, transcript, lengths):
         """
@@ -232,7 +243,7 @@ class RawAudioAttackerLightning(LightningModule):
         # Indicates main phase (could be logged if needed)
         finetune = False
         eot_prob, no_speech_prob, total_probs = self.forward(x, self.noise)
-        loss = -torch.log(eot_prob + 1e-9).mean()
+        loss = -torch.log(eot_prob + 1e-9).mean()       
 
         # Calculate extra metrics
         prob_argmax = total_probs.argmax(dim=-1)
@@ -291,7 +302,8 @@ class RawAudioAttackerLightning(LightningModule):
             loss = z.mean()
         
         else:
-            return NameError
+            # No constraint selected
+            raise KeyError
 
         return loss, metrics
 
@@ -306,17 +318,19 @@ class RawAudioAttackerLightning(LightningModule):
 
         if self.finetune: # Specifically if set to fine-tuning phase
             loss, metrics = self._fine_tuning_phase(x, sampling_rate, transcript, lengths)
-        elif epoch_number <= self.train_epochs:
-            loss, metrics = self._main_training_phase(x,sampling_rate, transcript, lengths)
         else:
-            loss, metrics = self._fine_tuning_phase(x, sampling_rate, transcript, lengths)
+            loss, metrics = self._main_training_phase(x,sampling_rate, transcript, lengths)
+        # elif epoch_number <= self.train_epochs:
+        #     loss, metrics = self._main_training_phase(x,sampling_rate, transcript, lengths)
+        # else:
+        #     loss, metrics = self._fine_tuning_phase(x, sampling_rate, transcript, lengths)
 
         self.debug = False
 
-        self.log("loss", loss, batch_size=self.batch_size,
+        self.log("loss", loss, batch_size = self.batch_size,
                  prog_bar=True, on_step=True, on_epoch=True)
         for key, value in metrics.items():
-            self.log(key, value, prog_bar=True, on_step=True)
+            self.log(key, value, prog_bar=True, batch_size=self.batch_size, on_step=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -329,7 +343,7 @@ class RawAudioAttackerLightning(LightningModule):
         eot_prob, no_speech_prob, total_probs = self.forward(x, self.noise)
 
         loss = -torch.log(eot_prob + 1e-9).mean()
-        self.log("val_loss", loss, prog_bar=True)
+        self.log("val_loss", loss, batch_size=self.batch_size,prog_bar=True)
         return loss
 
     def _threshold_loss(self, noise, audio, fs=16000, window_size=2048):
