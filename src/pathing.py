@@ -63,13 +63,16 @@ class AttackPath:
         if args.use_discriminator:
             self.add_dir("discriminator")
             num_constraints +=1
-        if args.frequency_decay:
+        if args.freq_decay:
             self.add_dir("frequency_decay")
-            self.add_dir(str(args.frequency_decay))
+            self.add_dir(str(args.freq_decay))
             self.add_dir(str(args.decay_strength))
             num_constraints +=1
         if args.frequency_penalty:
             self.add_dir("frequency_penalty")
+            num_constraints +=1
+        if args.mel_mask:
+            self.add_dir("mel_mask")
             num_constraints +=1
         if args.no_speech:
             self.add_dir("nospeech")

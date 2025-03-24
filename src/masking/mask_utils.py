@@ -1,6 +1,7 @@
 from .preprocess_threshold import preprocess_dataset
 import numpy as np
 def masking(args):
+    threshold=None
     if args.frequency_masking:
         threshold_dir = (args.root_dir / args.dataset.split(":")[0] / "thresholds") # If no threshold path, create it
         threshold_dir.mkdir(exist_ok=True,parents=True)
