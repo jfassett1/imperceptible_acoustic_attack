@@ -1,15 +1,13 @@
 """
 Modified decoder file from original whisper repo.
 """
-from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import TYPE_CHECKING
 
-import numpy as np
 import torch
-import torch.nn as nn
 import whisper
 
 if TYPE_CHECKING:
-    from whisper.model import Whisper
+    pass
 
 
 
