@@ -91,6 +91,8 @@ def get_args():
                         help="Number of cores allocated to masking threshold.")
     parser.add_argument("--window_size", type=int,
                         default=2048, help="Window Size for FFT")
+    parser.add_argument('--mel_mask', action="store_true",
+                    default=False, help="Use Mel Mask")
 
     # NOTE: For controlling strength, use gamma
     # Optimizer and scheduler settings #TODO: Implement these arguments
@@ -112,8 +114,8 @@ def get_args():
                         help='Comma-separated list of GPU IDs to use for training')
 
     # Saving Settings
-    parser.add_argument('--show', action="store_true",
-                        default=False, help="Whether to save image")
+    parser.add_argument('--show', action="store_false",
+                        default=True, help="Whether to save image")
     parser.add_argument('--save_ppt', action="store_true", default=False,
                         help="Whether to save powerpoint with examples")
     parser.add_argument('--log_path', action="store_true",
@@ -122,6 +124,8 @@ def get_args():
                         default=False, help="Print when modules activate")
     parser.add_argument('--eval', action="store_true",
                         default=False, help="Evaluation of model")
+    parser.add_argument('--only_finetune', action="store_true",
+                        default=False, help="Only do fine-tuning loop")
 
     # Debugging and testing
     # parser.add_argument('--debug', action='store_true', help='Run in debug mode with minimal data')
@@ -163,7 +167,7 @@ def main(args):
                                   num_workers=args.num_workers,
                                   attack_len=args.attack_length)
     # print([args.frequency_decay, args.frequency_penalty, args.frequency_masking, args.use_discriminator])
-    if any(x is not False for x in [args.frequency_penalty, args.frequency_masking, args.use_discriminator]):
+    if any(x is not False for x in [args.frequency_penalty, args.frequency_masking, args.use_discriminator,args.mel_mask]) and not args.only_finetune:
         print("Adding fine-tuning epoch(s)")
         imper_epochs = 1
 
@@ -214,6 +218,8 @@ def main(args):
                                              frequency_penalty=args.frequency_penalty,
                                              train_epochs=args.epochs,
                                              imper_epochs=imper_epochs,
+                                             finetune=args.only_finetune,
+                                             mel_mask=args.mel_mask
                                              )
 
     trainer = Trainer(max_epochs=args.epochs + imper_epochs,
