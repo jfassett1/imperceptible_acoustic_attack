@@ -6,7 +6,7 @@ Used to be in train_attack.py
 from pathlib import Path
 import sys
 import shlex
-
+import pandas as pd
 ROOT_DIR = Path(__file__).parent.parent
 
 NOISE_DIR = ROOT_DIR / "noise"
@@ -24,6 +24,25 @@ def log_path(PATHS,asl):
         file.write(row)
     return
 
+
+def log_path_pd(PATHS, asl):
+    log_file = ROOT_DIR / "paths.csv"
+    command = shlex.join(sys.argv)
+    noise_path = str(PATHS.noise_path)
+
+    new_entry = {
+        "command": command,
+        "noise_path": noise_path,
+        "asl": asl
+    }
+
+    if log_file.exists():
+        df = pd.read_csv(log_file)
+        df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
+    else:
+        df = pd.DataFrame([new_entry])
+
+    df.to_csv(log_file, index=False)
 
 class AttackPath:
     """
@@ -81,7 +100,7 @@ class AttackPath:
             self.add_dir("frequency_masking")
 
         if args.adaptive_clip:
-            self.add_dir(f"clip_val_adaptive")
+            self.add_dir("clip_val_adaptive")
         else:
             if None not in args.clip_val:
                 self.add_dir(f"clip_val_{round(args.clip_val[1],5)}")
