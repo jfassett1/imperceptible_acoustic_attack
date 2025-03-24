@@ -28,7 +28,6 @@ N_MELS = 80  # Whisper default setting
 SAMPLING_RATE = 16000
 
 
-# mel_frequencies = librosa.mel_frequencies(n_mels=N_MELS, fmin=1, fmax=SAMPLING_RATE/2)
 def compute_mel_bin_centers(mel_filter_bank, sr, n_fft):
     """
     Computes frequencies of each mel bin.
@@ -120,11 +119,7 @@ def moving_average(x, window_size=3, groups=1):
 
 def quiet(f):
     """returns threshold in quiet measured in SPL at frequency f with an offset 12(in Hz)"""
-    thresh = (
-        3.64 * pow(f * 0.001, -0.8)
-        - 6.5 * np.exp(-0.6 * pow(0.001 * f - 3.3, 2))
-        + 0.001 * pow(0.001 * f, 4)
-    )
+    thresh = -6.5 * torch.exp(-0.6 * torch.pow(0.001 * f - 3.3, 2))
     return thresh
 
 
@@ -149,18 +144,27 @@ def generate_mel_th(samp_mel: torch.tensor, lengths) -> torch.tensor:
     samp_mel = samp_mel.clone()
     conv = mask_conv(samp_mel)  # Power values at each frequency
 
-    quiets = quiet(mel_frequencies).to(DEVICE)  # Insert the quiet vals into every non-zero value
+    quiets = quiet(mel_frequencies).to(DEVICE) # Calculate the quiet values at all mel frequencies
     quiets = quiets.expand(batch_size, -1)
     # Normalize quiets
-
     ref_freq = torch.argmin(
         torch.abs(mel_frequencies - 1000)
     )  # Finding closest bin to 1000hz
+    # ref_vals = samp_mel[:, ref_freq, :]  # [B, T]
+    # mask = torch.arange(ref_vals.size(1), device=DEVICE).unsqueeze(0) < lengths.unsqueeze(1)  # [B, T]
+    # ref_db = (ref_vals * mask).sum(dim=1) / lengths
+
+    # ref_db = (ref_freqs.sum(dim=-1)) / lengths # Get average using the true lengths
+    # print(samp_mel[:,ref_freq,:])
     ref_db = torch.zeros_like(lengths, dtype=float, device=DEVICE)
+
     for i, (samp, rel_length) in enumerate(
         zip(samp_mel[:, ref_freq, :], lengths)
     ):  # Find the average value at 1000hz bin. Exclude the padded values
         ref_db[i] = samp[:rel_length].mean()
+
+    # print(lengths.shape)
+    # print("fake",ref_db)
     diff = quiets[:, ref_freq] - ref_db
 
     quiets = quiets - diff.view(-1, 1)  # Aligning quiets with sample
@@ -175,21 +179,21 @@ def generate_mel_th(samp_mel: torch.tensor, lengths) -> torch.tensor:
     return samp_mel
 
 
-mel_quiets = quiet(mel_frequencies + 1e-12)
 if __name__ == "__main__":
     output = "/home/jaydenfassett/audioversarial/imperceptible/src/masking/vis2.png"
 
     # print(neighborhood_size(mel_frequencies))
-    qr = AudioDataModule("tedlium:", batch_size=10)
+    qr = AudioDataModule("tedlium:", batch_size=15)
     samp = pad_or_trim(qr.sample[0])
     dl = next(iter(qr.random_all_dataloader()))
-    tests = dl[0]
-    lengths = dl[-1]
+    tests = dl[0].to(DEVICE)
+    lengths = dl[-1].to(DEVICE)
     samp_mel = log_mel_spectrogram_raw(tests)
     threshold = generate_mel_th(samp_mel, lengths)
 
     # Vis code
     q = []
+    # print(dl[2][0])
     for i in range(5):
         # print(tests[i].shape)
         mel_len = int(estimate_mel_T(lengths[i]))
@@ -203,4 +207,4 @@ if __name__ == "__main__":
     # print(threshold)
     fig = show_mel_spectrograms(q)
     # fig = show_mel_spectrograms([samp_mel.squeeze(),samp_mel.squeeze(0),conv.squeeze(0)],titles=["Audio Spectrogram","Mean Strengths Visualization","Local Maxima strengths"])
-    fig.savefig(output)
+    # fig.savefig(output)
