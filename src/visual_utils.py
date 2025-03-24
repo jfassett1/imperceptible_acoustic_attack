@@ -161,7 +161,34 @@ def contrast(aud1,aud2):
     axes[1].set_title(f"Perturbed Audio ({len(aud2)/fs2:.2f} seconds)")
     return fig
 
-
+def show_mel_spectrograms(mel_specs, sr=16000, hop_length=160, titles=None):
+    num_specs = len(mel_specs)
+    fig, axes = plt.subplots(1, num_specs, figsize=(5*num_specs, 5))
+    
+    if num_specs == 1:
+        axes = [axes]
+    
+    for i, mel in enumerate(mel_specs):
+        # Convert tensor to numpy array if necessary.
+        if not isinstance(mel, np.ndarray):
+            # For PyTorch tensors: detach and move to CPU if needed.
+            if hasattr(mel, "detach"):
+                mel = mel.detach().cpu().numpy()
+            # For other tensors that already have a numpy() method.
+            elif hasattr(mel, "numpy"):
+                mel = mel.numpy()
+            else:
+                raise ValueError("Input mel_spec is not a numpy array or a convertible tensor.")
+                
+        ax = axes[i]
+        librosa.display.specshow(mel, sr=sr, hop_length=hop_length,
+                                 x_axis='time', y_axis='mel', ax=ax,
+                                 shading="gouraud", cmap="magma")
+        title = titles[i] if titles is not None and i < len(titles) else f"Spectrogram {i+1}"
+        ax.set_title(title)
+    
+    plt.tight_layout()
+    return fig
 
 def audio_to_img(noise, #Learned noise
                  audio_list, #Sample noises to overlay over audio
