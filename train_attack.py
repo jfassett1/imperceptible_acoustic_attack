@@ -2,21 +2,6 @@ import argparse
 import os
 import sys
 
-import torch
-import torch.distributed as dist
-from pytorch_lightning import Trainer
-
-from eval import evaluate
-from src.attacker.mel_attacker import MelBasedAttackerLightning
-from src.attacker.raw_attacker import RawAudioAttackerLightning
-from src.data import AudioDataModule, clipping
-from src.masking.mask_utils import masking
-from src.pathing import ROOT_DIR, AttackPath, log_path
-
-# from src.discriminator import MelDiscriminator
-from src.visual_utils import show
-
-
 def get_args():
     parser = argparse.ArgumentParser(description="Training Script Arguments")
 
@@ -31,8 +16,8 @@ def get_args():
                         default=1e-5, help='Weight decay (L2 regularization)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducibility')
-    parser.add_argument('--dataset', type=str, default="librispeech:dev-clean",
-                        help="Which dataset to use. Should look like `dataset:split` ex. librispeech:dev-clean")
+    parser.add_argument('--dataset', type=str, default="librispeech:clean-100",
+                        help="Which dataset to use. Should look like `dataset:split` ex. librispeech:clean-100")
     parser.add_argument("--no_train", action="store_true", default=False,
                         help="Whether to train noise. Used for testing pathing & saving")
     parser.add_argument("--whisper_model", choices=['tiny.en', 'base.en', 'small.en',
@@ -46,7 +31,7 @@ def get_args():
                         default=False, help="Whether to prepend or not")
     parser.add_argument('--noise_dir', type=str, default=None,
                         help="Where to save noise outputs")
-    parser.add_argument('--gamma', type=float, default=1.,
+    parser.add_argument('--gamma', type=float, default=1e-5,
                         help="Gamma value for scaling penalty")
     parser.add_argument("--no_speech", action="store_true",
                         default=False, help="Whether to use Nospeech in loss function")
@@ -106,7 +91,8 @@ def get_args():
                         default=10, help='Step size for StepLR')
     parser.add_argument('--scheduler_gamma', type=float,
                         default=0.1, help='Gamma for StepLR')
-
+    parser.add_argument('--val_frequency',
+                        default=None,type=float, help="Train on dev set for quick testing")
     # GPU settings
     parser.add_argument('--device', type=str, default='cuda',
                         choices=['cpu', 'cuda'], help='Device to use for training')
@@ -118,14 +104,16 @@ def get_args():
                         default=True, help="Whether to save image")
     parser.add_argument('--save_ppt', action="store_true", default=False,
                         help="Whether to save powerpoint with examples")
-    parser.add_argument('--log_path', action="store_true",
-                        default=False, help="Whether to save paths in CSV")
+    parser.add_argument('--log_path', action="store_false",
+                        default=True, help="Whether to save paths in CSV")
     parser.add_argument('--debug', action="store_true",
                         default=False, help="Print when modules activate")
     parser.add_argument('--eval', action="store_true",
                         default=False, help="Evaluation of model")
     parser.add_argument('--only_finetune', action="store_true",
                         default=False, help="Only do fine-tuning loop")
+    parser.add_argument('--quick_train', action="store_true",
+                        default=False, help="Train on dev set for quick testing")
 
     # Debugging and testing
     # parser.add_argument('--debug', action='store_true', help='Run in debug mode with minimal data')
@@ -136,6 +124,22 @@ def get_args():
 
 
 def main(args):
+    # Set gpu list before importing torch. Essential for defining gpus
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
+
+    import torch
+    import torch.distributed as dist
+    from pytorch_lightning import Trainer
+
+    from eval import evaluate
+    from src.attacker.mel_attacker import MelBasedAttackerLightning
+    from src.attacker.raw_attacker import RawAudioAttackerLightning, StopWhenLossBelowThreshold
+    from src.data import AudioDataModule, clipping
+    from src.masking.mask_utils import masking
+    from src.pathing import ROOT_DIR, AttackPath, log_path_pd
+
+    # from src.discriminator import MelDiscriminator
+    from src.visual_utils import show
     # ARG HANDLING
     # ------------------------------------------------------------------------------------------#
     args.dataset = args.dataset.lower()
@@ -222,14 +226,31 @@ def main(args):
                                              mel_mask=args.mel_mask
                                              )
 
-    trainer = Trainer(max_epochs=args.epochs + imper_epochs,
-                      val_check_interval=0.8,
+    trainer = Trainer(max_epochs=args.epochs,
+                      val_check_interval=args.val_frequency,
                       devices=gpu_list,
+                      callbacks=[StopWhenLossBelowThreshold(threshold=0.1,monitor="val_loss")],
                       enable_progress_bar=True)
+    train_dataloader = data_module.train_dataloader()
+    val_dataloader = data_module.val_dataloader()
+    if args.quick_train:
+        train_dataloader = val_dataloader
 
     if not args.no_train:
-        trainer.fit(attacker, data_module.train_dataloader(),
-                    data_module.val_dataloader())
+        if args.val_frequency is not None:
+            print("Validation")
+            trainer.fit(attacker, train_dataloader,
+                        val_dataloader)
+        else:
+            trainer.fit(attacker, train_dataloader)
+
+    # If we have a constraint
+    if imper_epochs > 0:
+        attacker.reset_optimizer() # Clears momentum & switches learning rate to gamma
+        attacker.finetune = True
+        finetune_trainer = Trainer(max_epochs=imper_epochs,devices=gpu_list,enable_progress_bar=True, limit_train_batches=0.3)
+        finetune_trainer.fit(attacker,train_dataloader)
+
 
     # Ending the
     if dist.is_initialized():
@@ -264,7 +285,7 @@ def main(args):
              args.prepend)
 
     if args.log_path:
-        log_path(PATHS, asl)
+        log_path_pd(PATHS, asl)
         return
 
 
