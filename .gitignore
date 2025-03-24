@@ -8,3 +8,5 @@ examples/*
 notebooks/
 *.png
 *.ipynb
+paths.txt
+paths.csv
