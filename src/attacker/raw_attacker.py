@@ -18,6 +18,7 @@ from whisper import log_mel_spectrogram, pad_or_trim
 from src.decoder import RawDecoder
 from src.masking.mask_threshold import compute_PSD_matrix_batch
 from src.utils import overlay_torch
+from src.masking.mel_mask import generate_mel_th, log_mel_spectrogram_raw
 
 # For preventing FutureWarning log from whisper.
 whisper.torch.load = functools.partial(whisper.torch.load, weights_only=True)
@@ -52,6 +53,8 @@ class RawAudioAttackerLightning(LightningModule):
                  concat_mel: bool = False,
                  imper_epochs: int = 0,
                  train_epochs: int = 1,
+                 mel_mask: bool = False,
+                 finetune:bool = False,
                  debug: bool = False  # Prints all special activated sections
                  ):
         super(RawAudioAttackerLightning, self).__init__()
@@ -89,7 +92,9 @@ class RawAudioAttackerLightning(LightningModule):
         self.discriminator = discriminator
         self.frequency_penalty = frequency_penalty
         self.concat_mel = concat_mel
+        self.mel_mask = mel_mask
         self.debug = debug
+        self.finetune = finetune
 
         self.frequency_masking = frequency_masking
         self.window_size = window_size
@@ -219,7 +224,7 @@ class RawAudioAttackerLightning(LightningModule):
             # Reset the optimizer so it doesn't keep momentum.
             self.optimizer = torch.optim.Adam(self.parameters(), lr=self.gamma)
 
-    def _main_training_phase(self, x):
+    def _main_training_phase(self, x, sampling_rate, transcript, lengths):
         """
         Main training phase: uses the default forward pass and loss.
         Returns the loss and a dictionary of additional metrics.
@@ -238,11 +243,12 @@ class RawAudioAttackerLightning(LightningModule):
         }
         return loss, metrics
 
-    def _fine_tuning_phase(self, x, sampling_rate):
+    def _fine_tuning_phase(self, x, sampling_rate, transcript, lengths):
         """
         Fine-tuning phase: chooses different loss functions based on which mode is active.
         Returns the loss and (optionally) a dictionary of additional metrics.
         """
+        
         finetune = True
         metrics = {}
         x_pad = x
@@ -273,6 +279,17 @@ class RawAudioAttackerLightning(LightningModule):
             l_theta = self._threshold_loss(self.noise, x_pad[:, :self.noise.shape[1]],
                                            fs=sampling_rate, window_size=self.window_size)
             loss = l_theta
+
+        elif self.mel_mask:
+            samp_mels = log_mel_spectrogram_raw(x)
+            threshold = generate_mel_th(samp_mel=samp_mels,lengths=lengths)
+            noise_mel = log_mel_spectrogram_raw(self.noise)
+            noise_mel_len = noise_mel.shape[-1]
+
+            diffs = noise_mel - threshold[:,:,:noise_mel_len]
+            z = relu(diffs) # Removing vals lower than the threshold
+            loss = z.mean()
+        
         else:
             return NameError
 
@@ -282,14 +299,17 @@ class RawAudioAttackerLightning(LightningModule):
         # Unpack the batch
         x, sampling_rate, transcript, lengths = batch
         epoch_number = self.current_epoch + 1  # one-indexing epoch num for convenience
-
+    
         x = pad_or_trim(x)
 
         # print(epoch_number,self.train_epochs)
-        if epoch_number <= self.train_epochs:
-            loss, metrics = self._main_training_phase(x)
+
+        if self.finetune: # Specifically if set to fine-tuning phase
+            loss, metrics = self._fine_tuning_phase(x, sampling_rate, transcript, lengths)
+        elif epoch_number <= self.train_epochs:
+            loss, metrics = self._main_training_phase(x,sampling_rate, transcript, lengths)
         else:
-            loss, metrics = self._fine_tuning_phase(x, sampling_rate)
+            loss, metrics = self._fine_tuning_phase(x, sampling_rate, transcript, lengths)
 
         self.debug = False
 
