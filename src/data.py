@@ -8,6 +8,7 @@ from tqdm import tqdm
 import numpy as np
 from time import time
 import types
+from torch.utils.data import ConcatDataset
 root_dir = Path(__file__).parent.parent
 data_dir = Path("/media/drive1/jaydenfassett/audio_data")
 # data_dir = root_dir / "data"
@@ -39,34 +40,65 @@ class AudioDataModule(pl.LightningDataModule):
         self.setup()
         #Search for a sample > 4 seconds
         while True:
-            samp_id = np.random.randint(0,len(self.dataset))
-            if self.dataset[samp_id][0].shape[-1] >= 16000 * 5:
-                self.sample = self.dataset[samp_id]
+            samp_id = np.random.randint(0,len(self.test_dataset))
+            if self.test_dataset[samp_id][0].shape[-1] >= 16000 * 5:
+                self.sample = self.test_dataset[samp_id]
+                # self.sample[0] = self.sample[0].detach()
                 break
-
     def prepare_data(self):
         # Download the dataset if it is not already available TODO: Full conditionals
+        self.supported = False
         match self.dataset_name.lower():
             case "librispeech":
-                self.dataset = torchaudio.datasets.LIBRISPEECH(data_dir, self.split, download=True)
+                assert self.split in ["other", "clean-100", "clean-360"], "Must be an approved split. [\"other\", \"clean-100\", \"clean-360\"]"
+                if self.split == "other":
+                    self.train_dataset = torchaudio.datasets.LIBRISPEECH(data_dir, "train-other-500", download=True)
+                    self.val_dataset = torchaudio.datasets.LIBRISPEECH(data_dir, "dev-other", download=True)
+                    self.test_dataset = torchaudio.datasets.LIBRISPEECH(data_dir, "test-other", download=True)
+                elif self.split == "clean-100":
+                    self.train_dataset = torchaudio.datasets.LIBRISPEECH(data_dir, "train-clean-100", download=True)
+                    self.val_dataset = torchaudio.datasets.LIBRISPEECH(data_dir, "dev-clean", download=True)
+                    self.test_dataset = torchaudio.datasets.LIBRISPEECH(data_dir, "test-clean", download=True)
+                elif self.split == "clean-360":
+                    self.train_dataset = torchaudio.datasets.LIBRISPEECH(data_dir, "train-clean-360", download=True)
+                    self.val_dataset = torchaudio.datasets.LIBRISPEECH(data_dir, "dev-clean", download=True)
+                    self.test_dataset = torchaudio.datasets.LIBRISPEECH(data_dir, "test-clean", download=True)
+
+                self.supported = True
+                return True
 
             case "tedlium": 
-                self.dataset = torchaudio.datasets.TEDLIUM(data_dir, release="release3", subset=self.split, audio_ext=".flac",download=True)
-                self.dataset._load_audio = types.MethodType(_load_audio_patched, self.dataset) #Monkey Patching original load_data function, because it does not default to the correct backend.
-
+                self.train_dataset = torchaudio.datasets.TEDLIUM(data_dir, release="release3", subset='train', audio_ext=".flac",download=True)
+                self.test_dataset = torchaudio.datasets.TEDLIUM(data_dir, release="release3", subset='test', audio_ext=".flac",download=True)
+                self.val_dataset= torchaudio.datasets.TEDLIUM(data_dir, release="release3", subset='dev', audio_ext=".flac",download=True)
+                for dset in [self.train_dataset,self.val_dataset,self.test_dataset]:
+                    dset._load_audio = types.MethodType(_load_audio_patched, dset) #Monkey Patching original load_data function, because it does not default to the correct backend.
+                self.supported = True
+                return True
             case "commonvoice":
                 self.dataset = torchaudio.datasets.COMMONVOICE(data_dir, version="cv-corpus-13.0-2023-03-09", download=True)
+                return False
 
             case "vctk":
                 self.dataset = torchaudio.datasets.VCTK(data_dir, download=True)
+                return False
             case _:
                 raise ValueError(f"Dataset {self.dataset_name} is not supported.")
-    
+            
+            
+    def random_sample(self):
+        
+        if self.supported:
+            samp_id = np.random.choice(len(self.train_dataset))
+            return self.train_dataset[samp_id]
+        else:
+            return self.dataset[samp_id]
     def setup(self, stage=None):
-        self.prepare_data()
-        train_size = int(0.9 * len(self.dataset))
-        val_size = len(self.dataset) - train_size
-        self.train_dataset, self.val_dataset = random_split(self.dataset, [train_size, val_size])
+        if not self.prepare_data():
+
+            train_size = int(0.9 * len(self.dataset))
+            val_size = len(self.dataset) - train_size
+            self.train_dataset, self.val_dataset = random_split(self.dataset, [train_size, val_size])
     def _normalize_3std(self,audio):
         pass
     def get_IQR(self,
@@ -128,19 +160,28 @@ class AudioDataModule(pl.LightningDataModule):
         self.q1 = q1
         return iqr, q3, q1
 
-    def collate_fn(self, batch,test=False): #Collate not the problem
+    def collate_fn(self, batch,test=False):
         # Collate function to handle variable-length audio sequences
 
         audio, sampling_rate,transcript,utt,speak,chap= zip(*batch)
         #No need to trim
-        if self.dataset_name == "librispeech":
-            resized_audio = [pad_or_trim_patch(aud[:,16000:]) if test else pad_or_trim(aud[:,16000:]) for aud in audio] #Trimming first sec for librispeech
-        else:
-            resized_audio = [pad_or_trim_patch(aud) if test else pad_or_trim(aud) for aud in audio]
+        resized_audio = []
+        lengths = torch.zeros(len(sampling_rate)) # Empty vector for lengths to be inserted
+        for i,aud in enumerate(audio):
+            
+
+            if self.dataset_name == "librispeech":
+                aud = aud[:, 16000:]  # Trim first second
+            lengths[i] = aud.shape[-1]
+            if test:
+                resized_audio.append(pad_or_trim_patch(aud))
+            else:
+                resized_audio.append(pad_or_trim(aud))
+
 
         audio_signals = torch.cat(resized_audio,dim=0)
         # labels = torch.tensor(labels)
-        return audio_signals, sampling_rate, transcript
+        return audio_signals, sampling_rate, transcript, lengths
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, 
@@ -153,13 +194,13 @@ class AudioDataModule(pl.LightningDataModule):
         return DataLoader(self.val_dataset, batch_size=batch_size_ld, 
                           num_workers=self.num_workers, shuffle=False, collate_fn=self.collate_fn)
     def all_dataloader(self):
-        return DataLoader(self.dataset, batch_size=self.batch_size, 
+        return DataLoader(ConcatDataset([self.train_dataset, self.val_dataset, self.test_dataset]), batch_size=self.batch_size, 
                           num_workers=self.num_workers, shuffle=False, collate_fn=self.collate_fn)        
     def random_all_dataloader(self):
-        return DataLoader(self.dataset, batch_size=self.batch_size, 
-                    num_workers=self.num_workers, shuffle=False, collate_fn=self.collate_fn)
+        return DataLoader(ConcatDataset([self.train_dataset, self.val_dataset, self.test_dataset]), batch_size=self.batch_size, 
+                    num_workers=self.num_workers, shuffle=True, collate_fn=self.collate_fn)
     def padded_dataloader(self):
-        return DataLoader(self.dataset, batch_size=self.batch_size, 
+        return DataLoader(ConcatDataset([self.train_dataset, self.val_dataset, self.test_dataset]), batch_size=self.batch_size, 
                     num_workers=self.num_workers, shuffle=True, collate_fn=lambda x: self.collate_fn(x,test=True))
     def _normalize(self,data):
         """
@@ -228,7 +269,7 @@ if __name__ == "__main__":
     # print(total_len)
     # print(num_zeroes/total_len)
 
-    qr = AudioDataModule(dataset_name="librispeech:train-clean-100",attack_len=2,batch_size=128,num_workers=0)
+    qr = AudioDataModule(dataset_name="librispeech:clean-100",attack_len=2,batch_size=128,num_workers=0)
     qr.get_IQR(N=10)
     dl = qr.padded_dataloader()
     samp = next(iter(dl))[0]
