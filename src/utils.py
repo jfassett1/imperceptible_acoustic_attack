@@ -1,10 +1,13 @@
+from typing import Optional, Union
+
+import numpy as np
+import torch
+import torch.nn.functional as F
 import whisper
-import matplotlib.pyplot as plt
 from scipy.io import wavfile
 from whisper import log_mel_spectrogram
-import numpy as np
-import librosa
-import torch
+
+
 def raw_to_mel(x,device="cpu"):
     x = whisper.pad_or_trim(x)
     mel = whisper.log_mel_spectrogram(x).to(device).unsqueeze(dim=0)
@@ -50,6 +53,7 @@ def overlay_torch(noise, raw_audio):
 
     # Return the result, squeeze if batch size is 1
     return result.squeeze(0) if result.shape[0] == 1 else result
+
 
 if __name__ == "__main__":
     aud = wavfile.read("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")[1]
