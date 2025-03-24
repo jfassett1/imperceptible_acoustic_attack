@@ -11,6 +11,10 @@ from whisper.audio import HOP_LENGTH, N_FFT, mel_filters
 
 from src.data import AudioDataModule
 from src.visual_utils import show_mel_spectrograms
+
+def estimate_mel_T(audio_len, hop_length=HOP_LENGTH, n_fft=N_FFT):
+    return 1 + (audio_len - n_fft) // hop_length
+
 def plotnshow(q1,q2):
     plt.figure()
     plt.plot(q1,label="Samp Strength Vals")
@@ -70,18 +74,32 @@ def mask_conv(mel_col):
     Does a 2nd derivative convolution, and removes all negative values
     
     """
-    smoothed = moving_average(mel_col) # Smooths first
+    frames = mel_col.shape[-1]
+    # print(mel_col.shape)
+    # exit()
+    smoothed = moving_average(mel_col,groups=frames) # Smooths first
+    # exit()
     kernel = torch.tensor([1, -16, 30, -16, 1], dtype=torch.float32) / 12.0
     kernel = kernel.view(1, 1, -1)
+    if frames > 1:
+        kernel = kernel.expand(frames, -1, -1)
 
-    conved = F.conv1d(smoothed,kernel,padding=2)
+
+    conved = F.conv1d(smoothed,kernel,padding=2,groups=frames).permute((0, 2, 1))
+    # print(conved.shape)
+    # exit()
     return F.relu(conved)
 
-def moving_average(x, window_size=3):
+
+def moving_average(x, window_size=3, groups=1):
     kernel = torch.ones(window_size) / window_size
     kernel = kernel.view(1, 1, window_size)
+    
+    if groups > 1:
+        kernel = kernel.expand(groups, -1, -1)
     padding = (window_size - 1) // 2
-    return F.conv1d(x, kernel, padding=padding)
+    x= x.permute(0, 2, 1)
+    return F.conv1d(x, kernel, padding=padding, groups=groups)
 
 def quiet(f):
      """returns threshold in quiet measured in SPL at frequency f with an offset 12(in Hz)"""
@@ -96,47 +114,76 @@ def db_to_whisper_unit(db: torch.Tensor):
     log10_power = db / 10.0
     return log10_power
 
-def generate_1d_th(samp_mel) -> torch.tensor:
+def generate_mel_th(samp_mel:torch.tensor,
+                    lengths) -> torch.tensor:
     """
     Generates 1d frequency mask given a sample
     
     """
-    
     assert len(samp_mel.shape) >= 3, "Expecting log mel spectrogram size (N, 80, T)"
-    mean_mel = samp_mel.mean(dim=-1)
-    conv = mask_conv(mean_mel) # Power values at each frequency
+    batch_size, frequencies, frames = samp_mel.shape
+    lengths = estimate_mel_T(lengths).int()
+
+    samp_mel = samp_mel.clone()
+    conv = mask_conv(samp_mel) # Power values at each frequency
 
 
     quiets = quiet(mel_frequencies) # Insert the quiet vals into every non-zero value
+    quiets = quiets.expand(batch_size,-1)
     # Normalize quiets
 
     ref_freq = torch.argmin(torch.abs(mel_frequencies-1000)) # Finding closest bin to 1000hz
-    ref_db = mean_mel[:,ref_freq] # Get mean vector val at closest frequency to 1000hz
+    ref_db = torch.zeros_like(lengths,dtype=float)
+    for i,(samp,rel_length) in enumerate(zip(samp_mel[:,ref_freq,:], lengths)): # Find the average value at 1000hz bin. Exclude the padded values
+        ref_db[i] = samp[:rel_length].mean()
+    diff = quiets[:,ref_freq] - ref_db
 
-    diff = quiets[ref_freq] - ref_db
-    quiets -= diff # Aligning quiets with sample
-    # print(conv)
-    conv[mean_mel > quiets] = 0
-    mean_mel[conv ==0] = torch.inf
-    return mean_mel
+
+    quiets = quiets - diff.view(-1,1) # Aligning quiets with sample
+    quiets = quiets.unsqueeze(-1).expand(batch_size,frequencies,frames) #Expand across time dim
+
+    conv[samp_mel < quiets] = 0
+    # print(conv.shape)
+    samp_mel[conv == 0] = torch.inf
+    # print(samp_mel)
+    return samp_mel
     
 mel_quiets = quiet(mel_frequencies + 1e-12)
 if __name__ == "__main__":
 
     
-    output = "/home/jaydenfassett/audioversarial/imperceptible/src/masking/vis.png"
+    output = "/home/jaydenfassett/audioversarial/imperceptible/src/masking/vis2.png"
 
     # print(neighborhood_size(mel_frequencies))
-    qr = AudioDataModule("tedlium:")
+    qr = AudioDataModule("tedlium:",batch_size=10)
     samp = pad_or_trim(qr.sample[0])
+    dl = next(iter(qr.random_all_dataloader()))
+    tests = dl[0]
+    lengths = dl[-1]
+    # exit()
+    samp_mel = log_mel_spectrogram_max(tests)
+    # print(samp_mel)
+    threshold = generate_mel_th(samp_mel,lengths)
+    # print("threshold shape",threshold.shape)
 
-    samp_mel = log_mel_spectrogram_max(samp)
+    # print((threshold == torch.inf).sum() / torch.numel(threshold))
 
-    threshold = generate_1d_th(samp_mel)
-    print(samp_mel.mean(dim=-1) - threshold)
-    print(threshold)
 
-    # fig = show_mel_spectrograms([samp_mel.squeeze(),mean_mel.squeeze(0),conv.squeeze(0)],titles=["Audio Spectrogram","Mean Strengths Visualization","Local Maxima strengths"])
-    # fig.savefig(output)
+    #Vis code
+    q = []
+    for i in range(5):
+        # print(tests[i].shape)
+        mel_len =int( estimate_mel_T(lengths[i]))
+        samp = log_mel_spectrogram_max(pad_or_trim(tests[i]))
+        # print(mel_len,samp.shape)
+        samp = samp[:,:mel_len]
+        q.append(samp)
+
+    # print(samp_mel_len)
+    # print(samp_mel.mean(dim=-1) - threshold)
+    # print(threshold)
+    fig = show_mel_spectrograms(q)
+    # fig = show_mel_spectrograms([samp_mel.squeeze(),samp_mel.squeeze(0),conv.squeeze(0)],titles=["Audio Spectrogram","Mean Strengths Visualization","Local Maxima strengths"])
+    fig.savefig(output)
 
 
