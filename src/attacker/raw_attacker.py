@@ -22,23 +22,31 @@ from src.masking.mask_threshold import compute_PSD_matrix_batch
 from src.utils import overlay_torch
 from src.masking.mel_mask import generate_mel_th, log_mel_spectrogram_raw
 from pytorch_lightning.callbacks import Callback
-
+import torch.distributed as dist
 # For preventing FutureWarning log from whisper.
 whisper.torch.load = functools.partial(whisper.torch.load, weights_only=True)
 
 
-class StopWhenLossBelowThreshold(Callback):
-    def __init__(self, threshold=0.1, monitor='val_loss'):
+class LossThresholdCallback(Callback):
+    def __init__(self, threshold):
         self.threshold = threshold
-        self.monitor = monitor
 
-    def on_validation_end(self, trainer, pl_module):
-        metrics = trainer.callback_metrics
-        current = metrics.get(self.monitor)
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        loss = outputs['loss'] if isinstance(outputs, dict) else outputs.item()
 
-        if current is not None and current < self.threshold:
-            print(f"Stopping: {self.monitor} = {current:.4f} < {self.threshold}")
+        # Broadcast stop condition from rank 0
+        should_stop = torch.tensor([loss < self.threshold], device=pl_module.device)
+        
+        if trainer.world_size > 1:
+            dist.all_reduce(should_stop, op=dist.ReduceOp.MAX)  # Any rank stopping will trigger all to stop
+
+        if should_stop.item():
             trainer.should_stop = True
+
+    def on_train_end(self, trainer, pl_module):
+        # Ensure all ranks wait here before moving on
+        if trainer.world_size > 1:
+            trainer.strategy.barrier()
 class RawAudioAttackerLightning(LightningModule):
     """
     LightningModule that prepends noise for adversarial attacks, based on
@@ -228,6 +236,11 @@ class RawAudioAttackerLightning(LightningModule):
     def on_train_epoch_start(self):
         # TODO: Add discriminator training here
         return
+    def on_train_batch_end(self, outputs, batch, batch_idx):
+        if outputs['loss'] < 10:
+            return -1
+        return super().on_train_batch_end(outputs, batch, batch_idx)
+    
 
     def reset_optimizer(self):
         # Switch optimizer for fine-tuning

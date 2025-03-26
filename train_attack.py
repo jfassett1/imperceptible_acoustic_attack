@@ -133,7 +133,7 @@ def main(args):
 
     from eval import evaluate
     from src.attacker.mel_attacker import MelBasedAttackerLightning
-    from src.attacker.raw_attacker import RawAudioAttackerLightning, StopWhenLossBelowThreshold
+    from src.attacker.raw_attacker import RawAudioAttackerLightning, LossThresholdCallback
     from src.data import AudioDataModule, clipping
     from src.masking.mask_utils import masking
     from src.pathing import ROOT_DIR, AttackPath, log_path_pd
@@ -157,9 +157,10 @@ def main(args):
         gpu_list = [int(gpu)
                     for gpu in os.environ['CUDA_VISIBLE_DEVICES'].split(",")]
         gpu_list = list(range(len(gpu_list)))
-        print(gpu_list)
-    except KeyError:
+        # print(gpu_list)
+    except KeyError as e:
         gpu_list = []
+        print(e)
         print("Running on CPU")
 
     # gpu_list = [int(gpu) for gpu in args.gpus.split(",")]
@@ -225,12 +226,19 @@ def main(args):
                                              finetune=args.only_finetune,
                                              mel_mask=args.mel_mask
                                              )
-
-    trainer = Trainer(max_epochs=args.epochs,
+    if args.val_frequency is not None:
+        callbacks = [LossThresholdCallback(threshold=0.15)]
+        # callbacks = None
+        print("Callback added")
+    else:
+        callbacks = None
+    trainer = Trainer(max_steps=10_000,
+        # max_epochs=args.epochs,
                       val_check_interval=args.val_frequency,
                       devices=gpu_list,
-                      callbacks=[StopWhenLossBelowThreshold(threshold=0.1,monitor="val_loss")],
+                      callbacks=callbacks,
                       enable_progress_bar=True)
+    
     train_dataloader = data_module.train_dataloader()
     val_dataloader = data_module.val_dataloader()
     if args.quick_train:
@@ -238,18 +246,19 @@ def main(args):
 
     if not args.no_train:
         if args.val_frequency is not None:
-            print("Validation")
             trainer.fit(attacker, train_dataloader,
                         val_dataloader)
         else:
             trainer.fit(attacker, train_dataloader)
+    # exit()
 
     # If we have a constraint
     if imper_epochs > 0:
+        print("Finetuning")
         attacker.reset_optimizer() # Clears momentum & switches learning rate to gamma
         attacker.finetune = True
-        finetune_trainer = Trainer(max_epochs=imper_epochs,devices=gpu_list,enable_progress_bar=True, limit_train_batches=0.3)
-        finetune_trainer.fit(attacker,train_dataloader)
+        finetune_trainer = Trainer(max_epochs=imper_epochs,devices=gpu_list,enable_progress_bar=True, limit_train_batches=0.05,val_check_interval=10)
+        finetune_trainer.fit(attacker,train_dataloader,val_dataloaders=val_dataloader)
 
 
     # Ending the
