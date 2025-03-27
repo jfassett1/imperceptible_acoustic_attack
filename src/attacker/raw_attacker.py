@@ -26,27 +26,7 @@ import torch.distributed as dist
 # For preventing FutureWarning log from whisper.
 whisper.torch.load = functools.partial(whisper.torch.load, weights_only=True)
 
-
-class LossThresholdCallback(Callback):
-    def __init__(self, threshold):
-        self.threshold = threshold
-
-    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
-        loss = outputs['loss'] if isinstance(outputs, dict) else outputs.item()
-
-        # Broadcast stop condition from rank 0
-        should_stop = torch.tensor([loss < self.threshold], device=pl_module.device)
-        
-        if trainer.world_size > 1:
-            dist.all_reduce(should_stop, op=dist.ReduceOp.MAX)  # Any rank stopping will trigger all to stop
-
-        if should_stop.item():
-            trainer.should_stop = True
-
-    def on_train_end(self, trainer, pl_module):
-        # Ensure all ranks wait here before moving on
-        if trainer.world_size > 1:
-            trainer.strategy.barrier()
+    
 class RawAudioAttackerLightning(LightningModule):
     """
     LightningModule that prepends noise for adversarial attacks, based on
@@ -349,14 +329,17 @@ class RawAudioAttackerLightning(LightningModule):
     def validation_step(self, batch, batch_idx):
         x, sampling_rate, transcript, lengths = batch
         epoch_number = self.current_epoch + 1  # one-indexing epoch num for convenience
-
         x = pad_or_trim(x)
         if self.frequency_masking:  # Saves a copy for PSD calculation if needed
             x_pad = x
         eot_prob, no_speech_prob, total_probs = self.forward(x, self.noise)
+        prob_argmax = total_probs.argmax(dim=-1)
+        eot_per = (prob_argmax == self.tokenizer.eot).sum() / len(prob_argmax)
 
         loss = -torch.log(eot_prob + 1e-9).mean()
         self.log("val_loss", loss, batch_size=self.batch_size,prog_bar=True)
+        self.log("val_per", eot_per, batch_size=self.batch_size,prog_bar=True)
+
         return loss
 
     def _threshold_loss(self, noise, audio, fs=16000, window_size=2048):

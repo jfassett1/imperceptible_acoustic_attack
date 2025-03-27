@@ -133,7 +133,8 @@ def main(args):
 
     from eval import evaluate
     from src.attacker.mel_attacker import MelBasedAttackerLightning
-    from src.attacker.raw_attacker import RawAudioAttackerLightning, LossThresholdCallback
+    from src.attacker.raw_attacker import RawAudioAttackerLightning
+    from src.callbacks import ValLossCallback, LrValActivate
     from src.data import AudioDataModule, clipping
     from src.masking.mask_utils import masking
     from src.pathing import ROOT_DIR, AttackPath, log_path_pd
@@ -227,9 +228,13 @@ def main(args):
                                              mel_mask=args.mel_mask
                                              )
     if args.val_frequency is not None:
-        callbacks = [LossThresholdCallback(threshold=0.15)]
+        callbacks = [ValLossCallback(threshold=0.91,
+                                     metric="val_per",
+                                     comp="greater"), 
+                    LrValActivate(0.1) # Lowers Learning rate and increases validation checking after loss reaches threshold.
+                    ]
         # callbacks = None
-        print("Callback added")
+        print("Callback(s) added")
     else:
         callbacks = None
     trainer = Trainer(max_steps=10_000,
@@ -250,18 +255,18 @@ def main(args):
                         val_dataloader)
         else:
             trainer.fit(attacker, train_dataloader)
-    # exit()
 
     # If we have a constraint
     if imper_epochs > 0:
         print("Finetuning")
+        callbacks = [ValLossCallback(threshold=0.8,metric="val_per",comp="less")]
         attacker.reset_optimizer() # Clears momentum & switches learning rate to gamma
         attacker.finetune = True
         finetune_trainer = Trainer(max_epochs=imper_epochs,devices=gpu_list,enable_progress_bar=True, limit_train_batches=0.05,val_check_interval=10)
         finetune_trainer.fit(attacker,train_dataloader,val_dataloaders=val_dataloader)
 
 
-    # Ending the
+    # Ending GPU processes
     if dist.is_initialized():
         dist.barrier()
     if trainer.global_rank != 0:
