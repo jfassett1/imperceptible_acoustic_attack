@@ -114,7 +114,9 @@ class RawAudioAttackerLightning(LightningModule):
             self.tokenizer = whisper.tokenizer.get_tokenizer(
                 multilingual=False, task="transcribe")
         else:
-            self.tokenizer = whisper.tokenizer.get_tokenizer(multilingual=True)
+            self.tokenizer = whisper.tokenizer.get_tokenizer(multilingual=True,task="transcribe")
+
+
         self.decoder = RawDecoder(self.model, self.tokenizer, self.device)
         # Freezing Whisper weights
         for param in self.model.parameters():
@@ -241,10 +243,16 @@ class RawAudioAttackerLightning(LightningModule):
         # Calculate extra metrics
         prob_argmax = total_probs.argmax(dim=-1)
         eot_per = (prob_argmax == self.tokenizer.eot).sum() / len(prob_argmax)
+        pred = prob_argmax.mode()[0].item() # Most likely value
+        # print(prob_argmax.shape)
+        # print(pred)
+        # exit()
         metrics = {
             "eot_per": round(eot_per.item(), 2),
-            "eot_pr": eot_prob.mean()
+            "eot_pr": eot_prob.mean(),
+            "pred":pred
         }
+        self.trainer.progress_bar_callback.set_token(self.tokenizer.decode([pred]))
         return loss, metrics
 
     def _fine_tuning_phase(self, x, sampling_rate, transcript, lengths):
@@ -335,7 +343,6 @@ class RawAudioAttackerLightning(LightningModule):
         eot_prob, no_speech_prob, total_probs = self.forward(x, self.noise)
         prob_argmax = total_probs.argmax(dim=-1)
         eot_per = (prob_argmax == self.tokenizer.eot).sum() / len(prob_argmax)
-
         loss = -torch.log(eot_prob + 1e-9).mean()
         self.log("val_loss", loss, batch_size=self.batch_size,prog_bar=True)
         self.log("val_per", eot_per, batch_size=self.batch_size,prog_bar=True)
