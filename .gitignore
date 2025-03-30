@@ -10,3 +10,4 @@ notebooks/
 *.ipynb
 paths.txt
 paths.csv
+demo/
