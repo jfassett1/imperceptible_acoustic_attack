@@ -2,7 +2,22 @@ from pytorch_lightning.callbacks import Callback
 import torch
 from typing import Literal
 import torch.distributed as dist
+from pytorch_lightning.callbacks.progress import TQDMProgressBar
 
+
+# For displaying current predicted etoken
+class TokenDisplayProgressBar(TQDMProgressBar):
+    def __init__(self):
+        super().__init__()
+        self.decoded_token_str = ""
+
+    def set_token(self, token_str: str):
+        self.decoded_token_str = token_str
+
+    def get_metrics(self, trainer, pl_module):
+        metrics = super().get_metrics(trainer, pl_module)
+        metrics["pred"] = self.decoded_token_str  # Add decoded string to progress bar
+        return metrics
 
 
 class LossThresholdCallback(Callback):
