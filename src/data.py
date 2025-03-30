@@ -20,7 +20,7 @@ def clipping(data_module,args):
         iqr, q3, q1 = data_module.get_IQR(N=10)
         args.clip_val = (q1 - 1.5*iqr,q3 + 1.5*iqr)
         print(f"Epsilon set to {args.clip_val}")
-    elif args.clip_val is None:
+    elif args.clip_val == -1:
         args.clip_val = (None,None)
     else:
         args.clip_val = (-args.clip_val,args.clip_val) # Duplicate for bounds
@@ -183,8 +183,11 @@ class AudioDataModule(pl.LightningDataModule):
         # labels = torch.tensor(labels)
         return audio_signals, sampling_rate, transcript, lengths
 
-    def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, 
+    def train_dataloader(self,batch_size=None):
+        batch_size_ld = self.batch_size
+        if batch_size is not None:
+            batch_size_ld = batch_size
+        return DataLoader(self.train_dataset, batch_size=batch_size_ld, 
                           num_workers=self.num_workers, shuffle=True, collate_fn=self.collate_fn)
 
     def val_dataloader(self,batch_size=None):
@@ -193,6 +196,12 @@ class AudioDataModule(pl.LightningDataModule):
             batch_size_ld = batch_size
         return DataLoader(self.val_dataset, batch_size=batch_size_ld, 
                           num_workers=self.num_workers, shuffle=False, collate_fn=self.collate_fn)
+    def test_dataloader(self,batch_size=None):
+        batch_size_ld = self.batch_size
+        if batch_size is not None:
+            batch_size_ld = batch_size
+        return DataLoader(self.test_dataset, batch_size=batch_size_ld, 
+                          num_workers=self.num_workers, shuffle=True, collate_fn=self.collate_fn)
     def all_dataloader(self):
         return DataLoader(ConcatDataset([self.train_dataset, self.val_dataset, self.test_dataset]), batch_size=self.batch_size, 
                           num_workers=self.num_workers, shuffle=False, collate_fn=self.collate_fn)        
