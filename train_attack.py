@@ -21,7 +21,7 @@ def get_args():
     parser.add_argument("--no_train", action="store_true", default=False,
                         help="Whether to train noise. Used for testing pathing & saving")
     parser.add_argument("--whisper_model", choices=['tiny.en', 'base.en', 'small.en',
-                        'medium.en'], default='tiny.en', help='Which Whisper model to use')
+                        'medium.en',"tiny","base","medium",], default='tiny.en', help='Which Whisper model to use')
     # Attack Settings
     parser.add_argument('--domain', type=str, default="raw_audio", choices=[
                         'raw_audio', "mel"], help="Whether to attack in mel or audio space")
@@ -38,7 +38,7 @@ def get_args():
 
     # Epsilon Constraints
     parser.add_argument('--clip_val', type=float,
-                        default=None, help="Clamping Value")
+                        default=0.02, help="Clamping Value")
     parser.add_argument('--adaptive_clip', action="store_true", default=False,
                         help="Whether to adapt the clipping value to the dataset.")
 
@@ -78,21 +78,25 @@ def get_args():
                         default=2048, help="Window Size for FFT")
     parser.add_argument('--mel_mask', action="store_true",
                     default=False, help="Use Mel Mask")
-
+    
+    # VALIDATION ARGS
+    # ----------------------------------------------------------------------------------------------------------------#
+    parser.add_argument('--val_frequency',
+                        default=None,type=float, help="Frequency for validation checking")
     # NOTE: For controlling strength, use gamma
-    # Optimizer and scheduler settings #TODO: Implement these arguments
     # ----------------------------------------------------------------------------------------------------------------#
 
+    ## OPTIMIZATION ARGS
     parser.add_argument('--optimizer', type=str, default='adam',
                         choices=['adam', 'sgd'], help='Optimizer type')
+    parser.add_argument("--val_stop_threshold",type=float,default=0.95,help="Stops training when certain val percentage is achieved")
+
+    parser.add_argument('--finetune_min_val', type=float, default= 0.9,help="Validation lower bound for fine-tuning.")
+
     parser.add_argument('--scheduler', type=str, default=None,
                         choices=['step', 'cosine'], help='Learning rate scheduler')
-    parser.add_argument('--scheduler_step_size', type=int,
-                        default=10, help='Step size for StepLR')
-    parser.add_argument('--scheduler_gamma', type=float,
-                        default=0.1, help='Gamma for StepLR')
-    parser.add_argument('--val_frequency',
-                        default=None,type=float, help="Train on dev set for quick testing")
+
+
     # GPU settings
     parser.add_argument('--device', type=str, default='cuda',
                         choices=['cpu', 'cuda'], help='Device to use for training')
@@ -134,7 +138,7 @@ def main(args):
     from eval import evaluate
     from src.attacker.mel_attacker import MelBasedAttackerLightning
     from src.attacker.raw_attacker import RawAudioAttackerLightning
-    from src.callbacks import ValLossCallback, LrValActivate
+    from src.callbacks import ValLossCallback, LrValActivate,TokenDisplayProgressBar
     from src.data import AudioDataModule, clipping
     from src.masking.mask_utils import masking
     from src.pathing import ROOT_DIR, AttackPath, log_path_pd
@@ -179,7 +183,6 @@ def main(args):
 
     # Handle clipping args
     clipping(data_module, args)
-
     # print(args.clip_val)
     if args.domain == "mel":
         raise NotImplementedError  # NOTE: Deprecated
@@ -231,14 +234,16 @@ def main(args):
         callbacks = [ValLossCallback(threshold=0.91,
                                      metric="val_per",
                                      comp="greater"), 
-                    LrValActivate(0.1) # Lowers Learning rate and increases validation checking after loss reaches threshold.
+                    LrValActivate(0.1), # Lowers Learning rate and increases validation checking after loss reaches threshold.
+                    TokenDisplayProgressBar()
                     ]
         # callbacks = None
         print("Callback(s) added")
     else:
         callbacks = None
-    trainer = Trainer(max_steps=10_000,
-        # max_epochs=args.epochs,
+    trainer = Trainer(
+        # max_steps=10_000,
+                    max_epochs=args.epochs,
                       val_check_interval=args.val_frequency,
                       devices=gpu_list,
                       callbacks=callbacks,
@@ -249,6 +254,7 @@ def main(args):
     if args.quick_train:
         train_dataloader = val_dataloader
 
+    ## TRAINER
     if not args.no_train:
         if args.val_frequency is not None:
             trainer.fit(attacker, train_dataloader,
@@ -256,13 +262,17 @@ def main(args):
         else:
             trainer.fit(attacker, train_dataloader)
 
-    # If we have a constraint
+    ## FINETUNING STEP
     if imper_epochs > 0:
         print("Finetuning")
-        callbacks = [ValLossCallback(threshold=0.8,metric="val_per",comp="less")]
+        callbacks = [ValLossCallback(threshold=args.val_stop_threshold,metric="val_per",comp="lesser")]
         attacker.reset_optimizer() # Clears momentum & switches learning rate to gamma
+        attacker.epsilon = (None,None) # Remove clipping constraint
         attacker.finetune = True
-        finetune_trainer = Trainer(max_epochs=imper_epochs,devices=gpu_list,enable_progress_bar=True, limit_train_batches=0.05,val_check_interval=10)
+        train_dataloader = data_module.train_dataloader(batch_size=1)
+        val_dataloader = data_module.val_dataloader(batch_size=64)
+        
+        finetune_trainer = Trainer(max_epochs=imper_epochs,callbacks=callbacks,devices=gpu_list,enable_progress_bar=True, limit_train_batches=0.05,val_check_interval=1)
         finetune_trainer.fit(attacker,train_dataloader,val_dataloaders=val_dataloader)
 
 
@@ -282,15 +292,16 @@ def main(args):
 
     # audio_sample = wavfile.read("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")[1]
     asl = None
+    per_muted = None
     # torch.cuda.set_device()
     # data_module.device = int(args.gpus[0])
 
     if args.eval:
         # torch.cuda.set_device(int())
 
-        evaluate(attacker.noise.detach(),
+        asl, per_muted = evaluate(attacker.noise.detach(),
                  data_module,
-                 args,)
+                 args)
 
     if args.show:
         show(attacker.noise.detach().cpu().numpy().squeeze(),
@@ -299,7 +310,7 @@ def main(args):
              args.prepend)
 
     if args.log_path:
-        log_path_pd(PATHS, asl)
+        log_path_pd(PATHS, asl,per_muted)
         return
 
 
