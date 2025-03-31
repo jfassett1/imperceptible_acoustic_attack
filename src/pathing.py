@@ -25,7 +25,7 @@ def log_path(PATHS,asl):
     return
 
 
-def log_path_pd(PATHS, asl):
+def log_path_pd(PATHS, asl, per_muted):
     log_file = ROOT_DIR / "paths.csv"
     command = shlex.join(sys.argv)
     noise_path = str(PATHS.noise_path)
@@ -33,7 +33,8 @@ def log_path_pd(PATHS, asl):
     new_entry = {
         "command": command,
         "noise_path": noise_path,
-        "asl": asl
+        "asl": asl,
+        "per_muted":per_muted
     }
 
     if log_file.exists():
