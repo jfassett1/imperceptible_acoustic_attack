@@ -31,7 +31,7 @@ def get_args():
                         default=False, help="Whether to prepend or not")
     parser.add_argument('--noise_dir', type=str, default=None,
                         help="Where to save noise outputs")
-    parser.add_argument('--gamma', type=float, default=1e-5,
+    parser.add_argument('--gamma', type=float, default=0,
                         help="Gamma value for scaling penalty")
     parser.add_argument("--no_speech", action="store_true",
                         default=False, help="Whether to use Nospeech in loss function")
@@ -134,11 +134,11 @@ def main(args):
     import torch
     import torch.distributed as dist
     from pytorch_lightning import Trainer
-
+    from pytorch_lightning.callbacks.early_stopping import EarlyStopping
     from eval import evaluate
     from src.attacker.mel_attacker import MelBasedAttackerLightning
     from src.attacker.raw_attacker import RawAudioAttackerLightning
-    from src.callbacks import ValLossCallback, LrValActivate,TokenDisplayProgressBar
+    from src.callbacks import ValLossCallback, LrValActivate,TokenDisplayProgressBar, FinetuningCallback
     from src.data import AudioDataModule, clipping
     from src.masking.mask_utils import masking
     from src.pathing import ROOT_DIR, AttackPath, log_path_pd
@@ -231,23 +231,28 @@ def main(args):
                                              mel_mask=args.mel_mask
                                              )
     if args.val_frequency is not None:
-        callbacks = [ValLossCallback(threshold=0.91,
-                                     metric="val_per",
-                                     comp="greater"), 
-                    LrValActivate(0.1), # Lowers Learning rate and increases validation checking after loss reaches threshold.
-                    TokenDisplayProgressBar()
+        callbacks = [
+            # ValLossCallback(threshold=0.98,
+            #                          metric="val_per",
+            #                          comp="greater"), 
+                    LrValActivate(1), # Lowers Learning rate and increases validation checking after loss reaches threshold.
+                    TokenDisplayProgressBar(),
+                    FinetuningCallback(),
+                    EarlyStopping(monitor="val_per",mode="max")
                     ]
         # callbacks = None
         print("Callback(s) added")
     else:
         callbacks = None
     trainer = Trainer(
-        # max_steps=10_000,
-                    max_epochs=args.epochs,
+                    max_steps=5000,
+                    # max_epochs=args.epochs,
                       val_check_interval=args.val_frequency,
                       devices=gpu_list,
                       callbacks=callbacks,
-                      enable_progress_bar=True)
+                      enable_progress_bar=True,
+                      logger=False,
+                      enable_checkpointing=False)
     
     train_dataloader = data_module.train_dataloader()
     val_dataloader = data_module.val_dataloader()
@@ -262,18 +267,17 @@ def main(args):
         else:
             trainer.fit(attacker, train_dataloader)
 
-    ## FINETUNING STEP
-    if imper_epochs > 0:
-        print("Finetuning")
-        callbacks = [ValLossCallback(threshold=args.val_stop_threshold,metric="val_per",comp="lesser")]
-        attacker.reset_optimizer() # Clears momentum & switches learning rate to gamma
-        attacker.epsilon = (None,None) # Remove clipping constraint
-        attacker.finetune = True
-        train_dataloader = data_module.train_dataloader(batch_size=1)
-        val_dataloader = data_module.val_dataloader(batch_size=64)
+    # if imper_epochs > 0:
+    #     print("Finetuning")
+    #     callbacks = [ValLossCallback(threshold=args.val_stop_threshold,metric="val_per",comp="lesser")]
+    #     attacker.reset_optimizer() # Clears momentum & switches learning rate to gamma
+    #     attacker.epsilon = (None,None) # Remove clipping constraint
+    #     attacker.finetune = True
+    #     train_dataloader = data_module.train_dataloader(batch_size=1)
+    #     val_dataloader = data_module.val_dataloader(batch_size=64)
         
-        finetune_trainer = Trainer(max_epochs=imper_epochs,callbacks=callbacks,devices=gpu_list,enable_progress_bar=True, limit_train_batches=0.05,val_check_interval=1)
-        finetune_trainer.fit(attacker,train_dataloader,val_dataloaders=val_dataloader)
+    #     finetune_trainer = Trainer(max_epochs=imper_epochs,callbacks=callbacks,devices=gpu_list,enable_progress_bar=True, limit_train_batches=0.05,val_check_interval=1)
+    #     finetune_trainer.fit(attacker,train_dataloader,val_dataloaders=val_dataloader)
 
 
     # Ending GPU processes
@@ -293,12 +297,8 @@ def main(args):
     # audio_sample = wavfile.read("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")[1]
     asl = None
     per_muted = None
-    # torch.cuda.set_device()
-    # data_module.device = int(args.gpus[0])
 
     if args.eval:
-        # torch.cuda.set_device(int())
-
         asl, per_muted = evaluate(attacker.noise.detach(),
                  data_module,
                  args)
