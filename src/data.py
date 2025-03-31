@@ -124,7 +124,7 @@ class AudioDataModule(pl.LightningDataModule):
         valid = 0
 
         print("Calculating Data Statistics...")
-        for i, (waveform, sample_rate, transcript) in pbar: # Waveform is (N, 480000)
+        for i, (waveform, sample_rate, transcript, lengths) in pbar: # Waveform is (N, 480000)
             
             # print(type(waveform))
 
@@ -278,7 +278,7 @@ if __name__ == "__main__":
     # print(total_len)
     # print(num_zeroes/total_len)
 
-    qr = AudioDataModule(dataset_name="librispeech:clean-100",attack_len=2,batch_size=128,num_workers=0)
+    qr = AudioDataModule(dataset_name="tedlium:",attack_len=2,batch_size=128,num_workers=0)
     qr.get_IQR(N=10)
     dl = qr.padded_dataloader()
     samp = next(iter(dl))[0]
@@ -311,7 +311,7 @@ if __name__ == "__main__":
     fig, axes = plt.subplots(2, 1, figsize=(10, 6))
 
     # First subplot: Filtered data with constraint
-
+    # lower,upper = -0.02,0.02
     length = 5*16000
     axes[0].plot(filtered[:length])
     axes[0].set_title("Filtered with Constraint")
