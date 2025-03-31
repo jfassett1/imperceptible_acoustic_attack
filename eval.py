@@ -1,11 +1,16 @@
 import whisper
+from whisper import log_mel_spectrogram, pad_or_trim
 from src.data import AudioDataModule
+from src.decoder import RawDecoder
 import argparse
 import torch
 from tqdm import tqdm
 import numpy as np
+import functools
 from src.utils import overlay_torch
 # from pesq import pesq_batch
+whisper.torch.load = functools.partial(whisper.torch.load, weights_only=True)
+
 def get_args():
     parser = argparse.ArgumentParser(description="Training Script Arguments")
 
@@ -29,7 +34,7 @@ def evaluate(noise,data_module,args):
                                 args.whisper_model,
                                 num_workers=args.num_workers,
                                 data_module=data_module)
-    asl = evaluator.calc_asl()
+    asl,per_muted = evaluator.calc_asl()
 
 
 class RawEvaluator:
@@ -44,18 +49,25 @@ class RawEvaluator:
                  batch_size = 1,
                  num_workers=0,
                  ):
-            self.dataloader = data_module.val_dataloader(batch_size=1)
+            self.asl_dataloader = data_module.test_dataloader(batch_size=1)
+            self.dataloader = data_module.test_dataloader(batch_size=batch_size)
             self.device = device
             self.model = whisper.load_model(model).to(self.device)
+            if "en" in model:
+                self.tokenizer = whisper.tokenizer.get_tokenizer(
+                multilingual=False, task="transcribe")
+            else:
+                self.tokenizer = whisper.tokenizer.get_tokenizer(multilingual=True,task="transcribe")
+            self.decoder = RawDecoder(self.model,self.tokenizer,self.device)
             self.noise = noise.to(device) if isinstance(noise,torch.Tensor) else noise # Load noise & convert to tensor
             self.no_attack = no_attack
             self.batch_size = batch_size
+
             if self.noise.ndim > 1:
                 self.noise = self.noise.squeeze()
 
             self.tokenizer = whisper.tokenizer.get_tokenizer(multilingual=False,task="transcribe")
             self.prepend = prepend
-
     def _attack(self,
                 x,
                 noise):
@@ -83,23 +95,61 @@ class RawEvaluator:
         """
         i = 0
         asl = 0
-        with tqdm(self.dataloader, desc="Calculating ASL") as pbar:
+        per_muted = 0
+        with tqdm(self.asl_dataloader, desc="Calculating ASL") as pbar:
             for batch in pbar:
-                x, sampling_rate, transcript = batch
+                x, sampling_rate, transcript,length = batch
+                
                 x = x.to(self.device)
                 x = self._attack(x.squeeze(), self.noise)
-                output = self.model.transcribe(x)['text']
+                if len(sampling_rate) == 1: # If only one sample
+                    x_mel = log_mel_spectrogram(x).unsqueeze(0)
+                else:
+                    x_mel = log_mel_spectrogram(x)
+                # print(x.shape)
+                eot, _, total_probs = self.decoder.get_eot_prob(x_mel)
+                prob_argmax = total_probs.argmax(dim=-1)
+                if prob_argmax == self.tokenizer.eot:
+                    asl += 0
+                    per_muted += 1
+                else:
+                    output = self.model.transcribe(x)['text']
+                    asl += len(output)
+
                 i += 1
-                asl += len(output)
                 running_avg = asl / i
                 
                 # Update progress bar with the running average
-                pbar.set_postfix(running_avg=running_avg)
+                pbar.set_postfix(running_avg=running_avg, num_muted=per_muted)
         
         asl /= i
-        print("Average Sequence Length:", asl)
-        return asl
+        per_muted /= i
+        print(f"Average Sequence Length: {asl:.2f}")
+        print(f"Percent Muted: {per_muted:.2f}")
+        return asl,per_muted
     
+    # def num_silenced(self):
+    #     with tqdm(self.dataloader, desc="Calculating # of Silenced") as pbar:
+    #         muted = 0
+    #         for batch in pbar:
+    #             x, sampling_rate, transcript,length = batch
+
+    #             x = x.to(self.device)
+    #             x = self._attack(x.squeeze(), self.noise)
+    #             if len(sampling_rate) == 1: # If only one sample
+    #                 x_mel = log_mel_spectrogram(x).unsqueeze(0)
+    #             else:
+    #                 x_mel = log_mel_spectrogram(x)
+    #             eot, _, total_probs = self.decoder.get_eot_prob(x_mel)
+    #             prob_argmax = total_probs.argmax(dim=-1)
+    #             muted += (prob_argmax == self.tokenizer.eot).sum().item()
+    #             pbar.set_postfix(num_muted = muted)
+    #     print(muted / len(self.dataloader))
+
+    #     return muted / len(self.dataloader)
+
+
+
 
     # def calc_pesq(self,fs=16000):
     #     i = 0
@@ -121,6 +171,15 @@ class RawEvaluator:
     #     print("PESQ:", avg_pesq)
 
 if __name__ == "__main__":
+    attack = torch.tensor(np.load("/home/jaydenfassett/audioversarial/imperceptible/demo/tiny.en.np.npy")).unsqueeze(dim=0)
+    # attack = torch.zeros(1,16000)
+    dm = AudioDataModule("tedlium:",attack_len=2,batch_size=1)
+    qq = RawEvaluator(attack,"tiny.en",data_module=dm)
+
+
+    qq.calc_asl()
+    # qq.num_silenced()
+    exit()
 
     args = get_args()
     # noise = torch.randn(16000).to('cuda')
