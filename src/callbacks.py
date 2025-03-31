@@ -19,6 +19,28 @@ class TokenDisplayProgressBar(TQDMProgressBar):
         metrics["pred"] = self.decoded_token_str  # Add decoded string to progress bar
         return metrics
 
+class FinetuningCallback(Callback):
+    def __init__(self, patience_steps=50, check_interval=3):
+        self.best_val_loss = float('inf')
+        self.bad_steps = 0
+        self.patience_steps = patience_steps
+        self.check_interval = check_interval
+        self.step_count = 0
+
+    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
+        val_loss = outputs
+        self.step_count += 1
+
+        if self.step_count % self.check_interval == 0:
+            if val_loss < self.best_val_loss:
+                self.best_val_loss = val_loss
+                self.bad_steps = 0
+            else:
+                self.bad_steps += self.check_interval
+
+            if self.bad_steps >= self.patience_steps and not pl_module.stage == 2:
+                pl_module.stage = 2
+                print(f"Finetuning activated at step {self.step_count}")
 
 class LossThresholdCallback(Callback):
     def __init__(self, threshold, metric = 'loss'):
