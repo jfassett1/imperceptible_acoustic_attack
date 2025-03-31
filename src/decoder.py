@@ -29,7 +29,7 @@ class RawDecoder():
         self.model = self.model.to(device)
 
     def forward(self,mel,tokens=None):
-        if type(tokens) == None:
+        if type(tokens) is None:
             tokens = torch.tensor(self.tokenizer.sot_sequence_including_notimestamps).unsqueeze(dim=1).to(self.device)
             
         return self.model.forward(mel,tokens)
