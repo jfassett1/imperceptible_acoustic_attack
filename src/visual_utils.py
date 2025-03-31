@@ -61,36 +61,32 @@ def save_photo_overlay(noise, audio, savepath):
     savepath (str): Path where the image will be saved.
     """
     # Ensure noise and audio have the same length
-
     noise = np.concatenate([noise.squeeze(), np.zeros(len(audio) - len(noise))])
-
-    # Combine noise and audio
     combined_audio = noise + audio
 
     hop_length = 160
     mel_spec1 = log_mel_spectrogram(audio.astype(np.float32)).numpy()
     mel_spec2 = log_mel_spectrogram(combined_audio.astype(np.float32)).numpy()
 
-    # mel_spectrogram1 = librosa.feature.melspectrogram(y=aud1, sr=fs1, n_mels=80, hop_length=hop_length)
-    # mel_spectrogram_db1 = librosa.power_to_db(mel_spectrogram1, ref=np.max)
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    # mel_spectrogram2 = librosa.feature.melspectrogram(y=aud2, sr=fs1, n_mels=80, hop_length=hop_length)
-    # mel_spectrogram_db2 = librosa.power_to_db(mel_spectrogram2, ref=np.max)
+    img1 = librosa.display.specshow(mel_spec1, sr=16000, hop_length=hop_length, 
+                                    x_axis='time', y_axis='mel', ax=axes[0], 
+                                    shading="gouraud", cmap="magma")
+    img2 = librosa.display.specshow(mel_spec2, sr=16000, hop_length=hop_length, 
+                                    x_axis='time', y_axis='mel', ax=axes[1], 
+                                    shading="gouraud", cmap="magma")
 
-    fig,axes = plt.subplots(1,2,figsize = (12,5))
-
-    librosa.display.specshow(mel_spec1, sr=16000, hop_length=hop_length, 
-                            x_axis='time', y_axis='mel', ax=axes[0],shading="gouraud",cmap="magma")
-    
-    librosa.display.specshow(mel_spec2, sr=16000, hop_length=hop_length, 
-                            x_axis='time', y_axis='mel', ax=axes[1],shading="gouraud",cmap="magma")
     axes[0].set_title(f"Unperturbed Audio ({len(combined_audio)/16000:.2f} seconds)")
     axes[1].set_title(f"Perturbed Audio ({len(combined_audio)/16000:.2f} seconds)")
-    # Save the figure
+
+    # Add colorbars
+    fig.colorbar(img1, ax=axes[0], format="%+2.0f dB")
+    fig.colorbar(img2, ax=axes[1], format="%+2.0f dB")
+
     plt.tight_layout()
     plt.savefig(savepath)
     plt.close(fig)
-
 
 def save_photo_prepend(noise, audio, savepath):
     """
