@@ -53,7 +53,7 @@ class RawDecoder():
     def transcribe(self,x): # Whisper transcribe
         return self.model.transcribe(x)
 
-    def autoregressive(self,mel,n=15,sot_tokens=None):
+    def autoregressive(self,mel,n=30,sot_tokens=None):
         batch_size = mel.shape[0]
         if sot_tokens is None:
             sot_tokens = torch.tensor(self.tokenizer.sot_sequence_including_notimestamps).unsqueeze(dim=0).to(self.device)
@@ -61,23 +61,29 @@ class RawDecoder():
         
         tokens[:,:sot_tokens.shape[1]] = sot_tokens
         eot_id = self.tokenizer.eot
-
         for i in range(n):
-            print(i)
+            # print(i)
             logits = self.forward(mel,tokens[:,:i+sot_tokens.shape[1]])
             # print(logits.a)
             pred = logits[:,-1].argmax(dim=-1)
             tokens[0:,i+sot_tokens.shape[1]] = pred
-            print(pred)
-            if n is None:
-                if pred == eot_id:
-                    break
-                
+            # print(pred)
+
+            printable = tokens.squeeze()
+            printable = printable[printable != 0]
+            # if i % 2 != 0:
+            print(self.tokenizer.decode(printable))
+            # print(pred)
+            # print(eot_id)
+            # exit()
+            if pred.item() == eot_id:
+                # print("break")
+                break
         return tokens
 
 if __name__ == "__main__":
-    x = whisper.load_audio("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")
-    q = whisper.load_audio("/home/jaydenfassett/audioversarial/imperceptible/audio_with_attack.wav")
+    unperturbed = whisper.load_audio("/home/jaydenfassett/audioversarial/imperceptible/demo/sample.wav")
+    perturbed = whisper.load_audio("/home/jaydenfassett/audioversarial/imperceptible/demo/sample_attacked.wav")
     device = "cuda:3"
     # print("before:",x.shape)
     # x = np.concatenate([x,x,x])
@@ -90,12 +96,17 @@ if __name__ == "__main__":
     # mels = torch.cat((prep(q),prep(x)),dim=0)
     
 
-    mels = torch.cat((prep(q),prep(x)),dim=0).to(device)
-    print(mels.shape)
+    # mels = torch.cat((prep(q),prep(x)),dim=0).to(device)
+    # print(mels.shape)
 
-    NAME = "tiny"
-    tokenizer = whisper.tokenizer.get_tokenizer(multilingual=True,)
+    NAME = "tiny.en"
+    tokenizer = whisper.tokenizer.get_tokenizer(multilingual=False)
     model = whisper.load_model(NAME)
-    mel = mels[0].unsqueeze(0)
+    # mel = mels[1].unsqueeze(0)
+    mel = prep(perturbed)
+
     qq = RawDecoder(model=model,tokenizer=tokenizer,device=device)
-    print(qq.get_eot_prob(mel))
+
+    qq.autoregressive(mel,n=50,sot_tokens=qq.sot_tokens)
+
+    # print(qq.get_eot_prob(mel))
