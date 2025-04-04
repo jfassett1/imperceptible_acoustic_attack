@@ -158,6 +158,10 @@ def quiet(f):
     term3 = 0.001 * torch.pow(f_kHz, 4)
     return term1 + term2 + term3
 
+def Bark(f):
+    """Returns the bark-scale value for input frequency f (in Hz)"""
+    return 13 * torch.atan(0.00076 * f) + 3.5 * torch.atan((f / 7500.0) ** 2)
+
 
 def db_to_whisper_unit(db: torch.Tensor):
     """
@@ -166,6 +170,11 @@ def db_to_whisper_unit(db: torch.Tensor):
     # Divide by 10 to get log10-power units.
     log10_power = db / 10.0
     return log10_power
+
+def bin_indices(x: torch.Tensor):
+    """Returns the first index where each unique value in sorted 1D tensor `x` appears."""
+    change = torch.cat([torch.tensor([True], device=x.device), x[1:] != x[:-1]])
+    return torch.nonzero(change, as_tuple=False).flatten()
 
 
 def generate_mel_th(samp_mel: torch.tensor, lengths) -> torch.tensor:
@@ -182,6 +191,45 @@ def generate_mel_th(samp_mel: torch.tensor, lengths) -> torch.tensor:
 
     quiets = quiet(mel_frequencies).to(DEVICE) # Calculate the quiet values at all mel frequencies
     quiets = quiets.expand(batch_size, -1)
+    barks = Bark(mel_frequencies)
+
+
+    bark_bins = barks.floor().to(DEVICE,dtype=torch.int64)
+    bin_idx = bin_indices(bark_bins)
+    # print(bin_idx)
+    
+
+
+    B, F, T = samp_mel.shape
+    out = torch.zeros_like(samp_mel)
+
+    for i in range(len(bin_idx) - 1):
+        start, stop = bin_idx[i], bin_idx[i + 1]
+        # Slice the frequency bin: [B, freq_bin_size, T]
+        chunk = samp_mel[:, start:stop, :]
+
+        # Get max along freq dimension (dim=1)
+        max_idx = chunk.argmax(dim=1, keepdim=True)  # [B, 1, T]
+
+        # Build a one-hot mask
+        mask = torch.zeros_like(chunk)
+        mask.scatter_(1, max_idx, 1.0)
+        
+        # Apply mask and place in output
+        out[:, start:stop, :] = chunk * mask
+
+
+    
+    print(out.shape)
+    print(out[0,:,0])
+    print((out[0,:,0] != 0).sum())
+    exit()
+    print(bark_bins)
+    print(bin_idx)
+
+    # print(mel_col.scatter_reduce(dim=0,index=bark_bins,src=mel_col,reduce="amax"))
+    print(barks.shape)
+    exit()
     # Normalize quiets
   # Finding closest bin to 1000hz
     # ref_vals = samp_mel[:, ref_freq, :]  # [B, T]
@@ -232,10 +280,11 @@ def generate_mel_th(samp_mel: torch.tensor, lengths) -> torch.tensor:
 
 
 if __name__ == "__main__":
+
     output = "/home/jaydenfassett/audioversarial/imperceptible/src/masking/vis2.png"
     from whisper import log_mel_spectrogram
     # print(neighborhood_size(mel_frequencies))
-    qr = AudioDataModule("librispeech:clean-100", batch_size=15)
+    qr = AudioDataModule("librispeech:clean-100", batch_size=128)
     samp = pad_or_trim(qr.sample[0])
     dl = next(iter(qr.random_all_dataloader()))
     tests = dl[0].to(DEVICE)
