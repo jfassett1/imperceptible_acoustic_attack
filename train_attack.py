@@ -6,8 +6,8 @@ def get_args():
     parser = argparse.ArgumentParser(description="Training Script Arguments")
 
     # General training settings
-    parser.add_argument('--epochs', type=int, default=1,
-                        help='Number of training epochs')
+    parser.add_argument('--max_steps', type=int, default=5000,
+                        help='Number of training steps')
     parser.add_argument('--batch_size', type=int,
                         default=128, help='Batch size for training')
     parser.add_argument('--learning_rate', type=float,
@@ -118,6 +118,8 @@ def get_args():
                         default=False, help="Only do fine-tuning loop")
     parser.add_argument('--quick_train', action="store_true",
                         default=False, help="Train on dev set for quick testing")
+    parser.add_argument("--test_name", type=str, default=None,
+                        help='What to name the test')
 
     # Debugging and testing
     # parser.add_argument('--debug', action='store_true', help='Run in debug mode with minimal data')
@@ -149,7 +151,6 @@ def main(args):
     # ------------------------------------------------------------------------------------------#
     args.dataset = args.dataset.lower()
     args.root_dir = ROOT_DIR
-    imper_epochs = 0
 
     threshold = masking(args)
 
@@ -179,7 +180,6 @@ def main(args):
     # print([args.frequency_decay, args.frequency_penalty, args.frequency_masking, args.use_discriminator])
     if any(x is not False for x in [args.frequency_penalty, args.frequency_masking, args.use_discriminator,args.mel_mask]) and not args.only_finetune:
         print("Adding fine-tuning epoch(s)")
-        imper_epochs = 1
 
     # Handle clipping args
     clipping(data_module, args)
@@ -205,7 +205,6 @@ def main(args):
         #                                     discriminator=discriminator,
         #                                     frequency_decay=(args.decay_pattern,args.decay_strength),
         #                                     mask_threshold = threshold,
-        #                                     imper_epochs=imper_epochs,
         #                                     **vars(args)
         #                                     )
         attacker = RawAudioAttackerLightning(sec=ATTACK_LEN_SEC,
@@ -225,8 +224,6 @@ def main(args):
                                              mask_threshold=threshold,
                                              debug=args.debug,
                                              frequency_penalty=args.frequency_penalty,
-                                             train_epochs=args.epochs,
-                                             imper_epochs=imper_epochs,
                                              finetune=args.only_finetune,
                                              mel_mask=args.mel_mask
                                              )
@@ -237,7 +234,7 @@ def main(args):
             #                          comp="greater"), 
                     LrValActivate(1), # Lowers Learning rate and increases validation checking after loss reaches threshold.
                     TokenDisplayProgressBar(),
-                    FinetuningCallback(),
+                    # FinetuningCallback(),
                     EarlyStopping(monitor="val_per",mode="max")
                     ]
         # callbacks = None
@@ -245,8 +242,7 @@ def main(args):
     else:
         callbacks = None
     trainer = Trainer(
-                    max_steps=5000,
-                    # max_epochs=args.epochs,
+                    max_steps=args.max_steps,
                       val_check_interval=args.val_frequency,
                       devices=gpu_list,
                       callbacks=callbacks,
@@ -267,19 +263,6 @@ def main(args):
         else:
             trainer.fit(attacker, train_dataloader)
 
-    # if imper_epochs > 0:
-    #     print("Finetuning")
-    #     callbacks = [ValLossCallback(threshold=args.val_stop_threshold,metric="val_per",comp="lesser")]
-    #     attacker.reset_optimizer() # Clears momentum & switches learning rate to gamma
-    #     attacker.epsilon = (None,None) # Remove clipping constraint
-    #     attacker.finetune = True
-    #     train_dataloader = data_module.train_dataloader(batch_size=1)
-    #     val_dataloader = data_module.val_dataloader(batch_size=64)
-        
-    #     finetune_trainer = Trainer(max_epochs=imper_epochs,callbacks=callbacks,devices=gpu_list,enable_progress_bar=True, limit_train_batches=0.05,val_check_interval=1)
-    #     finetune_trainer.fit(attacker,train_dataloader,val_dataloaders=val_dataloader)
-
-
     # Ending GPU processes
     if dist.is_initialized():
         dist.barrier()
@@ -297,7 +280,7 @@ def main(args):
     # audio_sample = wavfile.read("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")[1]
     asl = None
     per_muted = None
-
+    final_metrics = trainer.callback_metrics
     if args.eval:
         asl, per_muted = evaluate(attacker.noise.detach(),
                  data_module,
@@ -310,7 +293,7 @@ def main(args):
              args.prepend)
 
     if args.log_path:
-        log_path_pd(PATHS, asl,per_muted)
+        log_path_pd(PATHS, asl,per_muted,args.test_name,final_metrics)
         return
 
 

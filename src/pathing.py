@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import shlex
 import pandas as pd
+import torch
 ROOT_DIR = Path(__file__).parent.parent
 
 NOISE_DIR = ROOT_DIR / "noise"
@@ -23,18 +24,30 @@ def log_path(PATHS,asl):
     with open(txt_file, "a") as file:
         file.write(row)
     return
+def unpack_metrics(metrics):
+    unpacked = {}
+    for key, tensor in metrics.items():
+        if isinstance(tensor, torch.Tensor):
+            # If tensor is a single element, use .item(), otherwise convert to list.
+            unpacked[key] = tensor.item() if tensor.numel() == 1 else tensor.detach().cpu().tolist()
+        else:
+            unpacked[key] = tensor
+    return unpacked
 
+def log_path_pd(PATHS, asl, per_muted, name, metrics: dict):
 
-def log_path_pd(PATHS, asl, per_muted):
     log_file = ROOT_DIR / "paths.csv"
     command = shlex.join(sys.argv)
     noise_path = str(PATHS.noise_path)
-
+    metrics = unpack_metrics(metrics)
+    # Combine fixed fields with metrics
     new_entry = {
+        "Name": name,
         "command": command,
         "noise_path": noise_path,
         "asl": asl,
-        "per_muted":per_muted
+        "per_muted": per_muted,
+        **metrics  # Unpack additional metrics into the row
     }
 
     if log_file.exists():
@@ -44,6 +57,7 @@ def log_path_pd(PATHS, asl, per_muted):
         df = pd.DataFrame([new_entry])
 
     df.to_csv(log_file, index=False)
+
 
 class AttackPath:
     """
@@ -80,6 +94,8 @@ class AttackPath:
         #------------------------------------------------------------------------------------------#
 
         num_constraints = 0
+        if args.test_name is not None:
+            self.add_dir(args.test_name)
         if args.use_discriminator:
             self.add_dir("discriminator")
             num_constraints +=1
@@ -107,7 +123,7 @@ class AttackPath:
                 self.add_dir(f"clip_val_{round(args.clip_val[1],5)}")
 
         self.add_dir(f"length_{args.attack_length}")
-        self.add_dir(f"epoch_{args.epochs}")
+        # self.add_dir(f"steps_{args.epochs}")
         
         if num_constraints > 0: #Conditional because gamma is meaningless when not using a constraint
             #TODO: Make different gammas
