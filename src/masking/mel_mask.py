@@ -18,43 +18,43 @@ def estimate_mel_T(audio_len, hop_length=HOP_LENGTH, n_fft=N_FFT):
 def plotnshow(q1, q2,q3):
     plt.figure()
     plt.plot(q1, label="Samp Strength Vals")
-    plt.plot(q2, label="ATH Threshold")
-    # plt.plot(q3,label="Noise with epsilon = 0.02")
+    plt.plot(q2, label="Updated threshold")
+    plt.plot(q3,label="ATH Threshold")
     # plt.plot(np.random.randn(80),label="Random noise")
     plt.legend()
     plt.tight_layout()
     plt.savefig("/home/jaydenfassett/audioversarial/imperceptible/quiets.png")
 
-def plotnshow(q1, q2, q3):
-    plt.figure()
-    plt.plot(q1, label="Samp Strength Vals")
-    plt.plot(q2, label="ATH Threshold")
+# def plotnshow(q1, q2, q3):
+#     plt.figure()
+#     plt.plot(q1, label="Samp Strength Vals")
+#     plt.plot(q2, label="ATH Threshold")
 
-    # Highlight the area between q1 and q2
-    plt.fill_between(
-        np.arange(len(q1)), 
-        q1, 
-        q2, 
-        where=(q1 > q2), 
-        interpolate=True, 
-        alpha=0.3, 
-        color='red', 
-        label="Above Threshold"
-    )
-    # plt.fill_between(
-    #     np.arange(len(q1)), 
-    #     q1, 
-    #     q2, 
-    #     where=(q1 <= q2), 
-    #     interpolate=True, 
-    #     alpha=0.3, 
-    #     color='blue', 
-    #     label="Below Threshold"
-    # )
+#     # Highlight the area between q1 and q2
+#     plt.fill_between(
+#         np.arange(len(q1)), 
+#         q1, 
+#         q2, 
+#         where=(q1 > q2), 
+#         interpolate=True, 
+#         alpha=0.3, 
+#         color='red', 
+#         label="Above Threshold"
+#     )
+#     # plt.fill_between(
+#     #     np.arange(len(q1)), 
+#     #     q1, 
+#     #     q2, 
+#     #     where=(q1 <= q2), 
+#     #     interpolate=True, 
+#     #     alpha=0.3, 
+#     #     color='blue', 
+#     #     label="Below Threshold"
+#     # )
 
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig("/home/jaydenfassett/audioversarial/imperceptible/quiets.png")
+#     plt.legend()
+#     plt.tight_layout()
+#     plt.savefig("/home/jaydenfassett/audioversarial/imperceptible/quiets.png")
 N_MELS = 80  # Whisper default setting
 SAMPLING_RATE = 16000
 
@@ -176,115 +176,94 @@ def bin_indices(x: torch.Tensor):
     change = torch.cat([torch.tensor([True], device=x.device), x[1:] != x[:-1]])
     return torch.nonzero(change, as_tuple=False).flatten()
 
-
 def generate_mel_th(samp_mel: torch.tensor, lengths) -> torch.tensor:
     """
-    Generates 1d frequency mask given a sample
+    Generates a 1D frequency mask given a sample using a two-slope spread function.
+    The approach is similar to the two_slops function but adjusted so that the threshold
+    is only raised (never lowered).
 
+    Assumptions:
+      - samp_mel has shape (N, 80, T) (or similar)
+      - mel_frequencies, DEVICE, estimate_mel_T, mask_conv, quiet, Bark, and bin_indices
+        are defined elsewhere.
     """
     assert len(samp_mel.shape) >= 3, "Expecting log mel spectrogram size (N, 80, T)"
     batch_size, frequencies, frames = samp_mel.shape
+
     lengths = estimate_mel_T(lengths).int()
 
     samp_mel = samp_mel.clone()
-    conv = mask_conv(samp_mel)  # Power values at each frequency
+    # conv = mask_conv(samp_mel)  # Power values at each frequency
 
-    quiets = quiet(mel_frequencies).to(DEVICE) # Calculate the quiet values at all mel frequencies
-    quiets = quiets.expand(batch_size, -1)
-    barks = Bark(mel_frequencies)
+    mel_max = samp_mel.max()
 
+    samp_mel = samp_mel +  (56.6 - mel_max)
 
-    bark_bins = barks.floor().to(DEVICE,dtype=torch.int64)
+    quiets = quiet(mel_frequencies).to(DEVICE)  # Quiet threshold for each mel frequency
+    quiets = quiets.view(1, -1, 1).expand(batch_size, -1, frames)
+    # quiets = quiets - 56.6  # empirically chosen offset
+
+    # Compute bark scale values from the mel frequencies (assumed monotonic)
+    barks = Bark(mel_frequencies).to(DEVICE)
+
+    # Use the bark values to form bins (each bin corresponding roughly to a critical band)
+    bark_bins = barks.floor().to(DEVICE, dtype=torch.int64)
     bin_idx = bin_indices(bark_bins)
-    # print(bin_idx)
-    
 
+    # Start with the quiet threshold and update with masker-based thresholds
+    threshold = quiets.clone()
 
-    B, F, T = samp_mel.shape
-    out = torch.zeros_like(samp_mel)
-
+    # Process each bark bin (frequency chunk)
     for i in range(len(bin_idx) - 1):
         start, stop = bin_idx[i], bin_idx[i + 1]
-        # Slice the frequency bin: [B, freq_bin_size, T]
         chunk = samp_mel[:, start:stop, :]
 
-        # Get max along freq dimension (dim=1)
-        max_idx = chunk.argmax(dim=1, keepdim=True)  # [B, 1, T]
+        max_val, max_idx = chunk.max(dim=1, keepdim=True)  # shape: (batch_size, 1, frames)
 
-        # Build a one-hot mask
-        mask = torch.zeros_like(chunk)
-        mask.scatter_(1, max_idx, 1.0)
+        # Get the bark values corresponding to the current chunk frequencies.
+        bark_chunk = barks[start:stop].view(1, -1, 1).expand(batch_size, -1, frames)
+        # Obtain the bark value of the masker by gathering using max_idx (relative index in the chunk)
+        bark_masker = bark_chunk.gather(dim=1, index=max_idx)
+
+        # Compute the difference (dz) in the bark scale between each frequency in the chunk and the masker.
+        # This will be negative for frequencies below the masker and positive for frequencies above.
+        dz = bark_chunk - bark_masker
+
+        # Initialize the spread function (sf) tensor.
+        sf = torch.zeros_like(dz)
+
+        # Create a tensor of indices for the chunk frequency bins to identify positions relative to the masker.
+        freq_indices = torch.arange(chunk.shape[1], device=chunk.device).view(1, -1, 1).expand_as(chunk)
+
+        # Define masks: for frequencies below the masker index and above it.
+        mask_lower = freq_indices < max_idx
+        mask_upper = freq_indices > max_idx
+
+        # For frequencies below the masker: use a positive slope with the absolute difference.
+        G = 5
+        sf[mask_lower] = G * torch.abs(dz[mask_lower])
         
-        # Apply mask and place in output
-        out[:, start:stop, :] = chunk * mask
+        # For frequencies above the masker: compute a level-dependent slope.
+        # The original two_slops used: (-27 + 0.37 * max(masker_level-40,0)) * dz,
+        upper_slope = G - 0.37 * torch.clamp(max_val - 40, min=0)
+        upper_slope_expanded = upper_slope.expand_as(dz)
+        sf[mask_upper] = upper_slope_expanded[mask_upper] * dz[mask_upper]
 
+        spread = max_val + sf
 
-    
-    print(out.shape)
-    print(out[0,:,0])
-    print((out[0,:,0] != 0).sum())
-    exit()
-    print(bark_bins)
-    print(bin_idx)
+        threshold[:, start:stop, :] = torch.maximum(threshold[:, start:stop, :], spread)
 
-    # print(mel_col.scatter_reduce(dim=0,index=bark_bins,src=mel_col,reduce="amax"))
-    print(barks.shape)
-    exit()
-    # Normalize quiets
-  # Finding closest bin to 1000hz
-    # ref_vals = samp_mel[:, ref_freq, :]  # [B, T]
-    # mask = torch.arange(ref_vals.size(1), device=DEVICE).unsqueeze(0) < lengths.unsqueeze(1)  # [B, T]
-    # ref_db = (ref_vals * mask).sum(dim=1) / lengths
-
-    # ref_db = (ref_freqs.sum(dim=-1)) / lengths # Get average using the true lengths
-    # print(samp_mel[:,ref_freq,:])
-
-    """
-    Previous method for aligning quiets
-    ref_freq = torch.argmin(
-    torch.abs(mel_frequencies - 1000)
-    )
-    ref_db = torch.zeros_like(lengths, dtype=float, device=DEVICE)
-
-    for i, (samp, rel_length) in enumerate(
-        zip(samp_mel[:, ref_freq, :], lengths)
-    ):  # Find the average value at 1000hz bin. Exclude the padded values
-        ref_db[i] = samp[:rel_length].mean()
-    diff = quiets[:, ref_freq] - ref_db
-
-    quiets = quiets - diff.view(-1, 1)  # Aligning quiets with sample
-    """
-    # print(lengths.shape)
-    # print("fake",ref_db)
-    quiets = quiets - 56.6 # seems to work best
-    # qq = torch.randn(16000 * 2,device="cuda").clamp_(min=-.02,max=.02)
-    # qq = torch.ones(16000 * 2, device="cuda") *0.5
-    # qq = log_mel_spectrogram_raw(qq)
-    # print("min",quiets.min())
-    # print("Max quiet vals per sample",(samp_mel[0,:,3]))
-    # print(ref_db)
-    # print(mel_frequencies)
-    plotnshow(samp_mel.cpu().numpy()[10,:,3],quiets[5].cpu().numpy(),"")
+    # plotnshow(samp_mel.cpu().numpy()[0,:,3],threshold[0,:,3].cpu().numpy(),quiets[0,:,3].cpu().numpy())
     # exit()
-
-
-    quiets = quiets.unsqueeze(-1).expand(
-        batch_size, frequencies, frames
-    )  # Expand across time dim
-
-    conv[samp_mel < quiets] = 0
-    samp_mel[conv == 0] = (
-        torch.inf
-    )  # Set all zero vals to infinite (will always be louder than perturbation)
-    return samp_mel
-
+    # exit()
+    return threshold
 
 if __name__ == "__main__":
 
     output = "/home/jaydenfassett/audioversarial/imperceptible/src/masking/vis2.png"
     from whisper import log_mel_spectrogram
     # print(neighborhood_size(mel_frequencies))
-    qr = AudioDataModule("librispeech:clean-100", batch_size=128)
+    qr = AudioDataModule("librispeech:clean-100", batch_size=2)
     samp = pad_or_trim(qr.sample[0])
     dl = next(iter(qr.random_all_dataloader()))
     tests = dl[0].to(DEVICE)
@@ -292,7 +271,26 @@ if __name__ == "__main__":
     # tests -= 0.0709
     samp_mel = log_mel_spectrogram_raw(tests)
     threshold = generate_mel_th(samp_mel, lengths)
+    random_mel = log_mel_spectrogram_raw(torch.randn(1,480000).clamp_(max=0.02,min=-0.02))
 
+
+
+    sample_idx = 0
+    frame_idx = 5 
+    plt.plot(threshold[sample_idx, :, frame_idx].cpu().numpy(), label="Masking Threshold")
+    # plt.plot(random_mel[sample_idx, :, frame_idx].cpu().numpy(), '--', label="Actual Audio Threshold")
+
+    # plt.plot(quiets[sample_idx, :, frame_idx].cpu().numpy(), '--', label="Quiet Threshold")
+    plt.xlabel("Mel/Frequency Bin")
+    plt.ylabel("dB")
+    plt.title("Threshold Curve at Frame 100")
+    plt.grid()
+    plt.legend()
+    plt.savefig("/home/jaydenfassett/audioversarial/imperceptible/quiets.png")
+    plt.show()
+
+
+    exit()
     # Vis code
     q = []
     # print(dl[2][0])
