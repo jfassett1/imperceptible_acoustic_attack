@@ -54,8 +54,6 @@ class RawAudioAttackerLightning(LightningModule):
                  masker_cores: int = 16,
                  mask_threshold: Union[np.array, np.ndarray] = None,
                  concat_mel: bool = False,
-                 imper_epochs: int = 0,
-                 train_epochs: int = 1,
                  mel_mask: bool = False,
                  finetune:bool = False,
                  debug: bool = False  # Prints all special activated sections
@@ -80,8 +78,6 @@ class RawAudioAttackerLightning(LightningModule):
         self.model = whisper.load_model(model).to(self.device)
         self.batch_size = batch_size
         self.learning_rate = learning_rate
-        self.imper_epochs = imper_epochs
-        self.train_epochs = train_epochs
 
         # Imperceptibility parameters
         self.epsilon = epsilon
@@ -178,6 +174,7 @@ class RawAudioAttackerLightning(LightningModule):
         # Optionally prepend the noise
 
         if self.prepend:
+            raise NotImplementedError # Takes in Mel Spectrogram, which is currently out of date
             noise = self.frequency_decay(noise, self.freq_decay)
             noise = noise.repeat(BATCH_SIZE, 1, 1)
             # Slice noise sized chunk from x & add noise
@@ -224,6 +221,7 @@ class RawAudioAttackerLightning(LightningModule):
         return super().on_train_batch_end(outputs, batch, batch_idx)
     def on_train_batch_start(self, batch, batch_idx):
 
+        return
         if self.global_step == 0:
             return
         # First stage, modify epsilon if needed
@@ -248,8 +246,7 @@ class RawAudioAttackerLightning(LightningModule):
 
     def reset_optimizer(self):
         # Switch optimizer for fine-tuning
-        # if self.current_epoch == (self.trainer.max_epochs - self.imper_epochs):
-            # Reset the optimizer so it doesn't keep momentum.
+        # Reset the optimizer so it doesn't keep momentum.
         self.optimizer = torch.optim.Adam(self.parameters(), lr=self.gamma)
 
     def training_step(self, batch, batch_idx):
@@ -278,7 +275,6 @@ class RawAudioAttackerLightning(LightningModule):
             loss_f = self._mel_difference(log_mel_spectrogram(x), noise_mel)
 
         elif self.no_speech:
-            no_speech_prob = self.forward(x, self.noise)[1]
             loss_f = -torch.log(no_speech_prob + 1e-9).mean()
 
             if self.debug:
@@ -295,7 +291,8 @@ class RawAudioAttackerLightning(LightningModule):
         elif self.mel_mask:
             samp_mels = log_mel_spectrogram_raw(x)
             threshold = generate_mel_th(samp_mel=samp_mels,lengths=lengths)
-            noise_mel = log_mel_spectrogram_raw(self.noise)
+            noise_mel = log_mel_spectrogram_raw(self.noise) + 56.6
+            noise_mel = noise_mel +  (56.6 - noise_mel.max())
             noise_mel_len = noise_mel.shape[-1]
 
             diffs = noise_mel - threshold[:,:,:noise_mel_len]
@@ -341,9 +338,9 @@ class RawAudioAttackerLightning(LightningModule):
         self.log("val_per", eot_per, batch_size=self.batch_size,prog_bar=True)
 
 
-        if eot_per.item() > 0.95:
-            self.stage = 2
-            self.gamma = 0.05
+        # if eot_per.item() > 0.95:
+        #     self.stage = 2
+        #     self.gamma = 0.05
         return loss
 
     def _threshold_loss(self, noise, audio, fs=16000, window_size=2048):
