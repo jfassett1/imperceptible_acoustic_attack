@@ -174,7 +174,7 @@ class RawAudioAttackerLightning(LightningModule):
         # Optionally prepend the noise
 
         if self.prepend:
-            raise NotImplementedError # Takes in Mel Spectrogram, which is currently out of date
+            raise NotImplementedError # NOTE: Takes in Mel Spectrogram, which is currently out of date
             noise = self.frequency_decay(noise, self.freq_decay)
             noise = noise.repeat(BATCH_SIZE, 1, 1)
             # Slice noise sized chunk from x & add noise
@@ -252,7 +252,6 @@ class RawAudioAttackerLightning(LightningModule):
     def training_step(self, batch, batch_idx):
         # Unpack the batch
         x, sampling_rate, transcript, lengths = batch
-        epoch_number = self.current_epoch + 1  # one-indexing epoch num for convenience
     
         x = pad_or_trim(x)
         x_pad = x
@@ -289,16 +288,16 @@ class RawAudioAttackerLightning(LightningModule):
             loss_f = l_theta
 
         elif self.mel_mask:
+            OFFSET = 60
             samp_mels = log_mel_spectrogram_raw(x)
-            threshold = generate_mel_th(samp_mel=samp_mels,lengths=lengths)
-            noise_mel = log_mel_spectrogram_raw(self.noise) + 56.6
-            noise_mel = noise_mel +  (56.6 - noise_mel.max())
+            threshold = generate_mel_th(samp_mel=samp_mels,lengths=lengths,offset = OFFSET)
+            noise_mel = log_mel_spectrogram_raw(self.noise).log10() * 10 # convert noise mel to db
+            noise_mel = noise_mel +  (OFFSET - noise_mel.max())
             noise_mel_len = noise_mel.shape[-1]
 
             diffs = noise_mel - threshold[:,:,:noise_mel_len]
             z = relu(diffs) # Removing vals lower than the threshold
             loss_f = z.mean()
-
 
         loss = (loss * (1 - self.gamma) + loss_f * self.gamma)
 

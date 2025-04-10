@@ -103,6 +103,7 @@ def log_mel_spectrogram_raw(
     n_mels: int = 80,
     padding: int = 0,
     device: Optional[Union[str, torch.device]] = None,
+    in_db = False
 ):
     """
     Modified log_mel_spectrogram function from whisper.audio
@@ -125,7 +126,9 @@ def log_mel_spectrogram_raw(
 
     filters = mel_filters(audio.device, n_mels)
     mel_spec = filters @ magnitudes
-    # log_spec = torch.clamp(mel_spec, min=1e-10).log10()
+    if in_db:
+        return torch.clamp(mel_spec, min=1e-10).log10() * 10
+    # log_spec = torch.clamp(mel_spec, min=1e-10).log10() * 10
     # return log_spec * 10
     return mel_spec
 
@@ -221,7 +224,7 @@ def two_slops(chunk, bark_values, max_val, max_idx, G=5):
 
     spread = max_val + sf
     return spread
-def generate_mel_th(samp_mel: torch.tensor, lengths, method = "groups") -> torch.tensor:
+def generate_mel_th(samp_mel: torch.tensor, lengths, method = "groups",offset=60) -> torch.tensor:
     """
     Generates a 1D frequency mask given a sample using a two-slope spread function.
     The approach is similar to the two_slops function but adjusted so that the threshold
@@ -244,8 +247,8 @@ def generate_mel_th(samp_mel: torch.tensor, lengths, method = "groups") -> torch
     mel_max = samp_mel.max()
 
     # OFFSET = 56.6
-    OFFSET = 60
-    samp_mel = samp_mel +  (OFFSET - mel_max)
+    # OFFSET = 60
+    samp_mel = samp_mel +  (offset - mel_max)
 
     quiets = quiet(mel_frequencies).to(DEVICE)  # Quiet threshold for each mel frequency
     quiets = quiets.view(1, -1, 1).expand(batch_size, -1, frames)
@@ -396,12 +399,12 @@ def generate_mel_th(samp_mel: torch.tensor, lengths, method = "groups") -> torch
         # Convert the summed value back to dB.
         threshold = 10 * torch.log10(threshold_lin)
 
-        plotnshow(
-            samp_mel[1, :, 5].cpu().numpy(),
-            threshold[1, :, 5].cpu().numpy(),
-            quiets[1, :, 5].cpu().numpy(),
-            local_max=max_tensor[1, :, 5].cpu().numpy()
-        )
+        # plotnshow(
+        #     samp_mel[1, :, 5].cpu().numpy(),
+        #     threshold[1, :, 5].cpu().numpy(),
+        #     quiets[1, :, 5].cpu().numpy(),
+        #     local_max=max_tensor[1, :, 5].cpu().numpy()
+        # )
 
         return threshold
 
