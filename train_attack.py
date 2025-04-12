@@ -302,7 +302,12 @@ def main(args):
         log_path_pd(PATHS, asl,per_muted,args.clip_val,args.attack_length ,args.test_name,final_metrics)
     if args.report:
 
-        make_report(ROOT_DIR / "paths.csv",args.test_name,args.dataset,ROOT_DIR/ "exampletest")
+        #make_report(df, test_name, dataset, dir_name, metric_name=None):
+        make_report(ROOT_DIR / "paths.csv",
+                    args.test_name,
+                    args.dataset,
+                    ROOT_DIR/ "exampletest",
+                    )
 
 
 if __name__ == "__main__":

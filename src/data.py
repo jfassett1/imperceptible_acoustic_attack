@@ -18,13 +18,13 @@ PAD_PLACEHOLDER = 1.337e-10
 def clipping(data_module,args):
     if args.adaptive_clip:
         iqr, q3, q1 = data_module.get_IQR(N=10)
-        args.clip_val = (q1 - 1.5*iqr,q3 + 1.5*iqr)
-        print(f"Epsilon set to {args.clip_val}")
+        clip_val = (q1 - 1.5*iqr,q3 + 1.5*iqr)
+        print(f"Epsilon set to {clip_val}")
     elif args.clip_val == -1:
-        args.clip_val = (None,None)
+        clip_val = (None,None)
     else:
-        args.clip_val = (-args.clip_val,args.clip_val) # Duplicate for bounds
-
+        clip_val = (-args.clip_val,args.clip_val) # Duplicate for bounds
+    return clip_val
 class AudioDataModule(pl.LightningDataModule):
     def __init__(self, dataset_name:str ="librispeech:dev-clean", attack_len = 1,batch_size=32, num_workers=0):
         super().__init__()
@@ -308,18 +308,27 @@ if __name__ == "__main__":
     plt.show()
     plt.savefig("/home/jaydenfassett/audioversarial/imperceptible/test.png")
     # print(filtered[:2_000_000])
-    fig, axes = plt.subplots(2, 1, figsize=(10, 6))
+    fig, axes = plt.subplots(2, 1, figsize=(6, 6))
 
     # First subplot: Filtered data with constraint
-    # lower,upper = -0.02,0.02
+    lower,upper = -0.02,0.02
     length = 5*16000
-    axes[0].plot(filtered[:length])
-    axes[0].set_title("Filtered with Constraint")
-    axes[0].axvline(x=16000, color="g", linestyle="--")
-    axes[0].axhline(y=lower, color='r', linestyle='--')
-    axes[0].axhline(y=upper, color='r', linestyle='--')
+
+    tick_locs = np.arange(0, length + 1, 16000)  # every second
+
+
+    axes[0].plot(filtered[:length], label="Audio waveform")
+    axes[0].set_title("Audio with Constraint")
+    # axes[0].axvline(x=16000, color="g", linestyle="--", label="Segment boundary")
+    axes[0].axhline(y=lower, color='r', linestyle='--', label=fr"$\epsilon = {upper}$")
+    axes[0].axhline(y=upper, color='r', linestyle='--', label="_nolegend_")
     axes[0].set_ylim(-1, 1)
     axes[0].set_xlim(0, length)
+    axes[0].set_xticks(tick_locs)
+    axes[0].set_ylabel("Amplitude")
+    axes[0].set_xlabel("Time (s)")
+    axes[0].set_xticklabels([f"{t//16000}" for t in tick_locs])
+    axes[0].legend()
     # Second subplot: First 16000 samples
     axes[1].plot(filtered[:16000* qr.attack_len])
     axes[1].set_title("First second")
@@ -330,6 +339,6 @@ if __name__ == "__main__":
     axes[1].set_xlim(0, 16000)
 
     # Adjust layout and save the figure
-    # plt.tight_layout()
+    plt.tight_layout()
     plt.savefig("/home/jaydenfassett/audioversarial/imperceptible/test2.png")
     plt.show()
