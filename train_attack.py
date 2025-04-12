@@ -38,7 +38,7 @@ def get_args():
 
     # Epsilon Constraints
     parser.add_argument('--clip_val', type=float,
-                        default=0.02, help="Clamping Value")
+                        default=-1, help="Clamping Value")
     parser.add_argument('--adaptive_clip', action="store_true", default=False,
                         help="Whether to adapt the clipping value to the dataset.")
 
@@ -112,14 +112,18 @@ def get_args():
                         default=True, help="Whether to save paths in CSV")
     parser.add_argument('--debug', action="store_true",
                         default=False, help="Print when modules activate")
-    parser.add_argument('--eval', action="store_true",
-                        default=False, help="Evaluation of model")
+    parser.add_argument('--eval', action="store_false",
+                        default=True, help="Evaluation of model")
     parser.add_argument('--only_finetune', action="store_true",
                         default=False, help="Only do fine-tuning loop")
     parser.add_argument('--quick_train', action="store_true",
                         default=False, help="Train on dev set for quick testing")
     parser.add_argument("--test_name", type=str, default=None,
                         help='What to name the test')
+    parser.add_argument("--report", action="store_true", default=False, help="Generate HTML report of audio samples")
+    parser.add_argument('--test_metric')
+    parser.add_argument('--offset',type=float,
+                        default=0, help='Thresh Offset')
 
     # Debugging and testing
     # parser.add_argument('--debug', action='store_true', help='Run in debug mode with minimal data')
@@ -144,6 +148,7 @@ def main(args):
     from src.data import AudioDataModule, clipping
     from src.masking.mask_utils import masking
     from src.pathing import ROOT_DIR, AttackPath, log_path_pd
+    from src.postprocess import make_report
 
     # from src.discriminator import MelDiscriminator
     from src.visual_utils import show
@@ -182,7 +187,7 @@ def main(args):
         print("Adding fine-tuning epoch(s)")
 
     # Handle clipping args
-    clipping(data_module, args)
+    clip_val = clipping(data_module, args)
     # print(args.clip_val)
     if args.domain == "mel":
         raise NotImplementedError  # NOTE: Deprecated
@@ -212,7 +217,7 @@ def main(args):
                                              prepend=args.prepend,
                                              batch_size=args.batch_size,
                                              discriminator=discriminator,
-                                             epsilon=args.clip_val,
+                                             epsilon=clip_val,
                                              gamma=args.gamma,
                                              no_speech=args.no_speech,
                                              frequency_decay=(
@@ -225,7 +230,8 @@ def main(args):
                                              debug=args.debug,
                                              frequency_penalty=args.frequency_penalty,
                                              finetune=args.only_finetune,
-                                             mel_mask=args.mel_mask
+                                             mel_mask=args.mel_mask,
+                                             offset = args.offset
                                              )
     if args.val_frequency is not None:
         callbacks = [
@@ -293,8 +299,10 @@ def main(args):
              args.prepend)
 
     if args.log_path:
-        log_path_pd(PATHS, asl,per_muted,args.test_name,final_metrics)
-        return
+        log_path_pd(PATHS, asl,per_muted,args.clip_val,args.attack_length ,args.test_name,final_metrics)
+    if args.report:
+
+        make_report(ROOT_DIR / "paths.csv",args.test_name,args.dataset,ROOT_DIR/ "exampletest")
 
 
 if __name__ == "__main__":

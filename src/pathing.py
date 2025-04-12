@@ -120,8 +120,8 @@ class AttackPath:
         if args.adaptive_clip:
             self.add_dir("clip_val_adaptive")
         else:
-            if None not in args.clip_val:
-                self.add_dir(f"clip_val_{round(args.clip_val[1],5)}")
+            if args.clip_val != -1:
+                self.add_dir(f"clip_val_{round(args.clip_val,5)}")
 
         self.add_dir(f"length_{args.attack_length}")
         # self.add_dir(f"steps_{args.epochs}")
