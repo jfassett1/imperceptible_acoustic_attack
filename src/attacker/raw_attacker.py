@@ -14,7 +14,7 @@ import whisper
 from pytorch_lightning import LightningModule
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
-from torch.nn.functional import relu
+import torch.nn.functional as F
 from whisper import log_mel_spectrogram, pad_or_trim
 
 from src.decoder import RawDecoder
@@ -56,7 +56,8 @@ class RawAudioAttackerLightning(LightningModule):
                  concat_mel: bool = False,
                  mel_mask: bool = False,
                  finetune:bool = False,
-                 debug: bool = False  # Prints all special activated sections
+                 debug: bool = False,  # Prints all special activated sections
+                 offset: float = 0
                  ):
         super(RawAudioAttackerLightning, self).__init__()
 
@@ -68,10 +69,11 @@ class RawAudioAttackerLightning(LightningModule):
                                 device=self.device).uniform_(-1, 1)
             if None not in epsilon:
                 noise.clamp_(min=epsilon[0], max=epsilon[1])
-
-        # print("Noise strides before:", noise.stride())
+                # noise.clamp_(min=0.00, max=0.00)
+        # # print("Noise strides before:", noise.stride())
         self.noise = nn.Parameter(noise.contiguous().reshape(1, -1))
-
+        # self.noise = nn.Parameter(noise.contiguous().reshape(1, -1))
+        # self.noise = nn.Parameter(torch.rand(1, int(sec * 16000)), requires_grad=True).to(self.device)
         # General hyperparameters for attack
         self.prepend = prepend
         self.noise_len = int(sec * 16000)
@@ -92,6 +94,7 @@ class RawAudioAttackerLightning(LightningModule):
         self.finetune = finetune
         self.last_loss = None
         self.stage = 1
+        self.offset = offset
 
         self.frequency_masking = frequency_masking
         self.window_size = window_size
@@ -211,7 +214,7 @@ class RawAudioAttackerLightning(LightningModule):
         mel2 = mel2.mean(dim=2)
 
         difference = mel1 - mel2
-        difference = relu(difference)
+        difference = F.relu(difference)
 
         return difference.sum()
 
@@ -258,7 +261,7 @@ class RawAudioAttackerLightning(LightningModule):
         eot_prob, no_speech_prob, total_probs = self.forward(x, self.noise)
 
         loss = -torch.log(eot_prob + 1e-9).mean()   
-        loss_f = 1
+        loss_f = None
 
         if self.discriminator is not None:
             raise NotImplementedError
@@ -288,19 +291,33 @@ class RawAudioAttackerLightning(LightningModule):
             loss_f = l_theta
 
         elif self.mel_mask:
+            # from src.masking.mel_mask import plotnshow
             OFFSET = 60
             samp_mels = log_mel_spectrogram_raw(x)
-            threshold = generate_mel_th(samp_mel=samp_mels,lengths=lengths,offset = OFFSET)
-            noise_mel = log_mel_spectrogram_raw(self.noise).log10() * 10 # convert noise mel to db
-            noise_mel = noise_mel +  (OFFSET - noise_mel.max())
+            threshold = generate_mel_th(samp_mel=samp_mels,lengths=lengths,offset = OFFSET) + self.offset
+            noise_mel = log_mel_spectrogram_raw(self.noise,in_db=True) # convert noise mel to db
+            # noise_mel = noise_mel +  (OFFSET - noise_mel.max())
             noise_mel_len = noise_mel.shape[-1]
 
+            # plotnshow(noise_mel.detach().cpu().numpy()[0,:,10],threshold.detach().cpu().numpy()[0,:,10])
+            # exit()
             diffs = noise_mel - threshold[:,:,:noise_mel_len]
-            z = relu(diffs) # Removing vals lower than the threshold
+            margin = 2
+            z = F.relu(diffs) # Removing vals lower than the threshold
+            # z = F.relu(diffs - margin) # Removing vals lower than the threshold
+            # z = F.softplus(diffs) # Removing vals lower than the threshold
+
             loss_f = z.mean()
+            # print("Noise power:", (self.noise**2).mean().item())
+            # print("Noise dB range:", noise_mel.min().item(), noise_mel.mean().item(), noise_mel.max().item())
+            # print("Threshold dB range:", threshold.min().item(), threshold.mean().item(), threshold.max().item())
 
-        loss = (loss * (1 - self.gamma) + loss_f * self.gamma)
-
+        # print(loss_f)
+        # print(f"Gamma: {self.gamma}, Loss: {loss.item()}, Loss_f: {loss_f.item()}")
+        if loss_f is not None:
+            loss = (loss * (1 - self.gamma) + loss_f * self.gamma)
+            if abs(self.gamma - 1.0) < 1e-6:
+                assert abs(loss.item() - loss_f.item()) < 1e-3, "Loss != Loss_f even though gamma == 1"
         prob_argmax = total_probs.argmax(dim=-1)
         eot_per = (prob_argmax == self.tokenizer.eot).sum() / len(prob_argmax)
         pred = prob_argmax.mode()[0].item() # Most likely value
@@ -371,7 +388,7 @@ class RawAudioAttackerLightning(LightningModule):
 if __name__ == "__main__":
     device = "cuda"
     # mt = np.load("/home/jaydenfassett/audioversarial/imperceptible/thresholds/train-clean-100.np.npy")
-    model = RawAudioAttackerLightning(prepend=False).to(device)
+    model = RawAudioAttackerLightning(prepend=False,mel_mask=True,gamma=0.5).to(device)
 
     x = whisper.load_audio(
         "/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")
