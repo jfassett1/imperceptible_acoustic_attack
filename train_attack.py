@@ -241,7 +241,7 @@ def main(args):
                     LrValActivate(1), # Lowers Learning rate and increases validation checking after loss reaches threshold.
                     TokenDisplayProgressBar(),
                     # FinetuningCallback(),
-                    EarlyStopping(monitor="val_per",mode="max")
+                    # EarlyStopping(monitor="val_per",patience=3,mode="max")
                     ]
         # callbacks = None
         print("Callback(s) added")
@@ -286,9 +286,10 @@ def main(args):
     # audio_sample = wavfile.read("/home/jaydenfassett/audioversarial/imperceptible/original_audio.wav")[1]
     asl = None
     per_muted = None
+    snr = None
     final_metrics = trainer.callback_metrics
     if args.eval:
-        asl, per_muted = evaluate(attacker.noise.detach(),
+        asl, per_muted, snr = evaluate(attacker.noise.detach(),
                  data_module,
                  args)
 
@@ -299,7 +300,14 @@ def main(args):
              args.prepend)
 
     if args.log_path:
-        log_path_pd(PATHS, asl,per_muted,args.clip_val,args.attack_length ,args.test_name,final_metrics)
+        log_path_pd(PATHS,
+                     asl,
+                     per_muted,
+                     snr,
+                     args.clip_val,
+                     args.attack_length,
+                     args.test_name,
+                     final_metrics)
     if args.report:
 
         #make_report(df, test_name, dataset, dir_name, metric_name=None):

@@ -34,7 +34,7 @@ def unpack_metrics(metrics):
             unpacked[key] = tensor
     return unpacked
 
-def log_path_pd(PATHS, asl, per_muted, clip_val, attack_length, name, metrics: dict):
+def log_path_pd(PATHS, asl, per_muted, snr, clip_val, attack_length, name, metrics: dict):
 
     log_file = ROOT_DIR / "paths.csv"
     command = shlex.join(sys.argv)
@@ -48,6 +48,8 @@ def log_path_pd(PATHS, asl, per_muted, clip_val, attack_length, name, metrics: d
         "clip_val": clip_val,
         "asl": asl,
         "per_muted": per_muted,
+        "attack_length":attack_length,
+        "snr":snr,
         **metrics  # Unpack additional metrics into the row
     }
 

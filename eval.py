@@ -34,7 +34,9 @@ def evaluate(noise,data_module,args):
                                 args.whisper_model,
                                 num_workers=args.num_workers,
                                 data_module=data_module)
-    asl,per_muted = evaluator.calc_asl()
+    results = evaluator.calc_asl()
+    return results
+
 
 
 class RawEvaluator:
@@ -55,9 +57,11 @@ class RawEvaluator:
             self.model = whisper.load_model(model).to(self.device)
             if "en" in model:
                 self.tokenizer = whisper.tokenizer.get_tokenizer(
-                multilingual=False, task="transcribe")
+                multilingual=False)
+                self.multi = False
             else:
-                self.tokenizer = whisper.tokenizer.get_tokenizer(multilingual=True,task="transcribe")
+                self.tokenizer = whisper.tokenizer.get_tokenizer(multilingual=True)
+                self.multi = True
             self.decoder = RawDecoder(self.model,self.tokenizer,self.device)
             self.noise = noise.to(device) if isinstance(noise,torch.Tensor) else noise # Load noise & convert to tensor
             self.no_attack = no_attack
@@ -96,12 +100,36 @@ class RawEvaluator:
         i = 0
         asl = 0
         per_muted = 0
+        eot_id = self.tokenizer.eot
+        avg_snr = 0
+
+        if self.multi:
+            eot_id += 1
         with tqdm(self.asl_dataloader, desc="Calculating ASL") as pbar:
+
+            assert len(self.noise.shape) == 1, "Incorrect noise length. Must be 1D"
+    
+            noise_len = self.noise.shape[0]
+            noise_pow = (self.noise.pow(2).sum() + 1e-12).log10() * 10
+
             for batch in pbar:
                 x, sampling_rate, transcript,length = batch
                 
                 x = x.to(self.device)
-                x = self._attack(x.squeeze(), self.noise)
+                x = x.squeeze()
+
+                samp_pow = (x[:noise_len].pow(2).sum() + 1e-12).log10() * 10
+                avg_snr += samp_pow - noise_pow
+                # import matplotlib.pyplot as plt
+
+                # plt.plot(x[:noise_len].detach().cpu().numpy(), label="Clean")
+                # plt.plot(self.noise.detach().cpu().numpy(), label="Noise", alpha=0.7)
+                # plt.savefig("/home/jaydenfassett/audioversarial/imperceptible/eval.png")
+
+
+                x = self._attack(x, self.noise) # Apply noise to the sample
+
+
                 if len(sampling_rate) == 1: # If only one sample
                     x_mel = log_mel_spectrogram(x).unsqueeze(0)
                 else:
@@ -109,12 +137,23 @@ class RawEvaluator:
                 # print(x.shape)
                 eot, _, total_probs = self.decoder.get_eot_prob(x_mel)
                 prob_argmax = total_probs.argmax(dim=-1)
-                if prob_argmax == self.tokenizer.eot:
+                # print(prob_argmax,self.tokenizer.eot)
+                # print(prob_argmax.item(),self.tokenizer.eot)
+                # vals = self.tokenizer.decode([prob_argmax,self.tokenizer.eot])
+                # print(vals)
+                # exit()
+
+                if prob_argmax == eot_id: #NOTE: If per_muted breaks, check the indexing in the tokenizer. During testing, we noticed that the tokenizer prediction, and its position are different.
                     asl += 0
                     per_muted += 1
+                    # print("h")
                 else:
                     output = self.model.transcribe(x)['text']
                     asl += len(output)
+
+                # print(x.shape)
+                # print(type(x))
+                # exit()
 
                 i += 1
                 running_avg = asl / i
@@ -124,9 +163,12 @@ class RawEvaluator:
         
         asl /= i
         per_muted /= i
+
+        avg_snr /= i
         print(f"Average Sequence Length: {asl:.2f}")
         print(f"Percent Muted: {per_muted:.2f}")
-        return asl,per_muted
+        print(f"Mean SNR: {avg_snr:.2f} db")
+        return asl,per_muted, avg_snr.item()
     
     # def num_silenced(self):
     #     with tqdm(self.dataloader, desc="Calculating # of Silenced") as pbar:
@@ -171,10 +213,14 @@ class RawEvaluator:
     #     print("PESQ:", avg_pesq)
 
 if __name__ == "__main__":
-    attack = torch.tensor(np.load("/home/jaydenfassett/audioversarial/imperceptible/demo/tiny.en.np.npy")).unsqueeze(dim=0)
+    # attack = torch.tensor(np.load("/home/jaydenfassett/audioversarial/imperceptible/noise/tiny/raw_audio/overlay/tedlium/GammaTest11/mel_mask/length_2.0/gamma_0.1/noise.np.npy")).unsqueeze(dim=0)
+    # attack = torch.tensor(np.load("/home/jaydenfassett/audioversarial/imperceptible/noise/tiny.en/raw_audio/overlay/tedlium/GammaTester2/length_2.0/noise.np.npy"))
+    attack = torch.tensor(np.load("/home/jaydenfassett/audioversarial/imperceptible/noise/tiny/raw_audio/overlay/tedlium/GammaTestMain/mel_mask/length_2.0/gamma_0.35/noise.np.npy"))
+    print(attack.shape)
+    # attack = torch.randn(32000) * 0.01
     # attack = torch.zeros(1,16000)
     dm = AudioDataModule("tedlium:",attack_len=2,batch_size=1)
-    qq = RawEvaluator(attack,"tiny.en",data_module=dm)
+    qq = RawEvaluator(attack,"tiny",data_module=dm)
 
 
     qq.calc_asl()
