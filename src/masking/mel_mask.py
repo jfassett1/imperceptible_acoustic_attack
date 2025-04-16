@@ -155,7 +155,7 @@ def mask_conv(mel_col):
 
 
 def moving_average(x, window_size=3, groups=1):
-    kernel = torch.ones(window_size, device=DEVICE) / window_size
+    kernel = torch.ones(window_size, device=DEVICE,dtype=x.dtype) / window_size
     kernel = kernel.view(1, 1, window_size)
 
     if groups > 1:
@@ -243,6 +243,7 @@ def generate_mel_th(samp_mel: torch.tensor, lengths, method = "groups",offset=60
     samp_mel = samp_mel.clone()
     # conv = mask_conv(samp_mel)  # Power values at each frequency
     smoothed = moving_average(samp_mel, groups=frames)
+    
     samp_mel = torch.clamp(smoothed, min=1e-10).log10() * 10 #convert to DB
     mel_max = samp_mel.max()
 
@@ -396,8 +397,11 @@ def generate_mel_th(samp_mel: torch.tensor, lengths, method = "groups",offset=60
         quiets_lin = torch.pow(10, quiets / 10.0)          # Convert quiet threshold to linear
         # Sum the quiet threshold and the masker contributions in the linear domain.
         threshold_lin = spread_lin + quiets_lin
+        # print(threshold_lin.dtype)
+        smoothed_threshold = moving_average(threshold_lin,5,groups=frames)
+
         # Convert the summed value back to dB.
-        threshold = 10 * torch.log10(threshold_lin)
+        threshold = 10 * torch.log10(smoothed_threshold)
 
         # plotnshow(
         #     samp_mel[1, :, 5].cpu().numpy(),
@@ -405,7 +409,7 @@ def generate_mel_th(samp_mel: torch.tensor, lengths, method = "groups",offset=60
         #     quiets[1, :, 5].cpu().numpy(),
         #     local_max=max_tensor[1, :, 5].cpu().numpy()
         # )
-
+        # exit()
         return threshold
 
 # All pre-computed values
@@ -431,9 +435,11 @@ if __name__ == "__main__":
     output = "/home/jaydenfassett/audioversarial/imperceptible/src/masking/vis2.png"
     from whisper import log_mel_spectrogram
     from time import time
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "2"
     # print(neighborhood_size(mel_frequencies))
     qr = AudioDataModule("librispeech:clean-100", batch_size=128)
+    # qr = AudioDataModule("tedlium:", batch_size=128)
+
     samp = pad_or_trim(qr.sample[0])
     dl = next(iter(qr.random_all_dataloader()))
     tests = dl[0].to(DEVICE)
@@ -443,12 +449,14 @@ if __name__ == "__main__":
     start1 = time()
     generate_mel_th(samp_mel, lengths,method="bins")
     end1 = time()
-    threshold = generate_mel_th(samp_mel, lengths,method="2")
+    threshold = generate_mel_th(samp_mel, lengths,method="2",offset=56.6)
     end2 = time()
 
     print(f"Bin Method: {(end1 - start1):.2f}")
     print(f"Group Method: {(end2 - end1):.2f}")
     # random_mel = log_mel_spectrogram_raw(torch.randn(1,480000).clamp_(max=0.02,min=-0.02))
+
+    plotnshow(samp_mel[1,:,1].detach().cpu(),threshold[1,:,1].detach().cpu())
     exit()
 
 
