@@ -292,20 +292,21 @@ class RawAudioAttackerLightning(LightningModule):
 
         elif self.mel_mask:
             # from src.masking.mel_mask import plotnshow
+            # OFFSET = 56.6
             OFFSET = 60
             samp_mels = log_mel_spectrogram_raw(x)
             threshold = generate_mel_th(samp_mel=samp_mels,lengths=lengths,offset = OFFSET) + self.offset
             noise_mel = log_mel_spectrogram_raw(self.noise,in_db=True) # convert noise mel to db
-            # noise_mel = noise_mel +  (OFFSET - noise_mel.max())
+            noise_mel = noise_mel +  (OFFSET - noise_mel.max())
             noise_mel_len = noise_mel.shape[-1]
 
             # plotnshow(noise_mel.detach().cpu().numpy()[0,:,10],threshold.detach().cpu().numpy()[0,:,10])
             # exit()
             diffs = noise_mel - threshold[:,:,:noise_mel_len]
             margin = 2
-            z = F.relu(diffs) # Removing vals lower than the threshold
+            # z = F.relu(diffs) # Removing vals lower than the threshold
             # z = F.relu(diffs - margin) # Removing vals lower than the threshold
-            # z = F.softplus(diffs) # Removing vals lower than the threshold
+            z = F.softplus(diffs) # Removing vals lower than the threshold
 
             loss_f = z.mean()
             # print("Noise power:", (self.noise**2).mean().item())
