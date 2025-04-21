@@ -24,10 +24,11 @@ def show(noise,
     # images_list,audio_list = audio_to_img(noise,audio_list,sample_audio,PATHS.audio_dir)
 
     if prepend:
-        save_photo_prepend(noise,sample_audio,PATHS.img_dir/"plot.png")
+        
+        save_photo_prepend(noise,sample_audio,PATHS.img_path)
     else:
-        save_photo_overlay(noise,sample_audio,PATHS.img_dir/"plot.png")
-    print(f"Saving image to {PATHS.img_dir/'plot.png'}")
+        save_photo_overlay(noise,sample_audio,PATHS.img_path)
+    print(f"Saving image to {PATHS.img_path}")
 
 def raw_to_mel(x,device="cpu"):
     x = whisper.pad_or_trim(x)

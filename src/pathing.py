@@ -108,9 +108,9 @@ class AttackPath:
                         if d.is_dir() and d.name.startswith(base)]
             idx = len(siblings) + 1
             # first run is "base", later ones "base_2", "base_3", …
-            suffix = "" if idx == 1 else f"_{idx}"
-            run_dir = runs_parent / f"{base}{suffix}"
-            run_dir.mkdir()
+            # suffix = "" if idx == 1 else f"_{idx}"
+            run_dir = runs_parent / f"{base}"
+            run_dir.mkdir(exist_ok=True,parents=True)
 
             # now enumerate the three artifacts themselves
             ext = ".np.npy" if args.domain == "raw_audio" else ".pth"
