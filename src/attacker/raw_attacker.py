@@ -305,8 +305,8 @@ class RawAudioAttackerLightning(LightningModule):
             diffs = noise_mel - threshold[:,:,:noise_mel_len]
             margin = 2
             # z = F.relu(diffs) # Removing vals lower than the threshold
-            # z = F.relu(diffs - margin) # Removing vals lower than the threshold
-            z = F.softplus(diffs) # Removing vals lower than the threshold
+            z = F.relu(diffs - margin) # Removing vals lower than the threshold
+            # z = F.softplus(diffs) # Removing vals lower than the threshold
 
             loss_f = z.mean()
             # print("Noise power:", (self.noise**2).mean().item())
