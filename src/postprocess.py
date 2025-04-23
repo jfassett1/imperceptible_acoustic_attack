@@ -6,7 +6,7 @@ from src.utils import overlay_np
 from pathlib import Path
 from tqdm import tqdm
 from scipy.io.wavfile import write
-
+import argparse
 
 
 def normalize_audio(audio):
@@ -79,13 +79,15 @@ def make_report(df, test_name, dataset, dir_name, metric_name=None):
 
         html += f"""
   <hr>
-  <h2>{metric_name}: {targ} | % muted: {per_muted:.2f} </h2>
+  <h2>{metric_name}: {targ} | % muted: {per_muted:.2f}  | SNR {row.snr:.2f}</h2>
   <audio controls>
     <source src="{out_wav}" type="audio/wav">
     Your browser does not support the audio element.
   </audio>
   <br>
-  <img src="{out_img}" alt="Overlay Plot for {metric_name} {targ}" style="max-width:600px;">
+  <img src="{out_img}" alt="Overlay Plot for {metric_name} {targ}" style="max-width:600px;"><br>
+    <small>{row.noise_path}</small>
+
 """
 
     html += """
@@ -101,7 +103,10 @@ def make_report(df, test_name, dataset, dir_name, metric_name=None):
     print(f"HTML report saved to {report_path}")
 
 if __name__ == "__main__":
-    make_report("/home/jaydenfassett/audioversarial/imperceptible/paths.csv","GammaTestSoftplus","tedlium:","/home/jaydenfassett/audioversarial/imperceptible/exampletest","gamma")
-    pass
+    parser = argparse.ArgumentParser()
+    parser.add_argument("input_value", help="Experiment path")
+    parser.add_argument("metric_name",help="Which metric to track")
+    args = parser.parse_args()
+    make_report("/home/jaydenfassett/audioversarial/imperceptible/paths.csv",args.input_value,"tedlium:","/home/jaydenfassett/audioversarial/imperceptible/exampletest",args.metric_name)
 
 

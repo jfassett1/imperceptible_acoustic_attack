@@ -99,19 +99,21 @@ class AttackPath:
         num_constraints = 0
         if args.test_name:
             base = args.test_name
-            # decide where to put it; here I'm versioning under root_dir/"noise":
             runs_parent = self.root_dir / "noise"
             runs_parent.mkdir(parents=True, exist_ok=True)
 
             # find existing run‑dirs that start with exactly that base
-            siblings = [d for d in runs_parent.iterdir()
-                        if d.is_dir() and d.name.startswith(base)]
-            idx = len(siblings) + 1
+            # siblings = [d for d in runs_parent.iterdir()
+            #             if d.is_dir() and d.name.startswith(base)]
+
             # first run is "base", later ones "base_2", "base_3", …
             # suffix = "" if idx == 1 else f"_{idx}"
             run_dir = runs_parent / f"{base}"
             run_dir.mkdir(exist_ok=True,parents=True)
-
+            siblings = list(run_dir.glob("*.npy"))
+            # print(siblings)
+            # print(run_dir)
+            idx = len(siblings) + 1
             # now enumerate the three artifacts themselves
             ext = ".np.npy" if args.domain == "raw_audio" else ".pth"
             # now enumerate purely by number, e.g. 1.np.npy, 2.np.npy, or 1.pth, 2.pth, …
